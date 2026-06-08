@@ -40,6 +40,10 @@
                             <td id="dashKachelId" class="value" style="font-weight: 700;">-</td>
                         </tr>
                         <tr>
+                            <td class="label">Orientierung</td>
+                            <td id="dashAdresse" class="value" style="font-size: 13px; font-weight: 600; line-height: 1.3; color: #1a1a1a;">-</td>
+                        </tr>
+                        <tr>
                             <td class="label">Einwohner gesamt</td>
                             <td id="dashEinwohner" class="value">-</td>
                         </tr>
@@ -59,33 +63,39 @@
                 </div>
 
                 <div class="data-panel">
-                    <div class="panel-title">Infrastruktur & POIs</div>
-                    <div class="poi-container">
-                        <div class="poi-row">
-                            <span class="poi-name" id="dashHospitalName" title="Krankenhaus">Krankenhaus</span>
-                            <span class="poi-distance" id="dashHospitalDist">-</span>
-                        </div>
-                        <div class="poi-row">
-                            <span class="poi-name" id="dashTownhallName" title="Rathaus">Rathaus</span>
-                            <span class="poi-distance" id="dashTownhallDist">-</span>
-                        </div>
-                        <div class="poi-row">
-                            <span class="poi-name" id="dashBahnhofName" title="Fernbahnhof">Fernbahnhof</span>
-                            <span class="poi-distance" id="dashBahnhofDist">-</span>
-                        </div>
-                        <div class="poi-row">
-                            <span class="poi-name" id="dashCinemaName" title="Kino">Kino</span>
-                            <span class="poi-distance" id="dashCinemaDist">-</span>
-                        </div>
-                        <div class="poi-row">
-                            <span class="poi-name" id="dashTheatreName" title="Theater">Theater</span>
-                            <span class="poi-distance" id="dashTheatreDist">-</span>
-                        </div>
-                        <div class="poi-row">
-                            <span class="poi-name" id="dashZooName" title="Zoo">Zoo</span>
-                            <span class="poi-distance" id="dashZooDist">-</span>
-                        </div>
-                    </div>
+                    <div class="panel-title">Erreichbarkeit: Daseinsvorsorge</div>
+                    <table class="poi-table">
+                        <tr>
+                            <td class="poi-label">Nächstes<br>Krankenhaus</td>
+                            <td id="dashHospitalDist" class="poi-value">-</td>
+                        </tr>
+                        <tr>
+                            <td class="poi-label">Nächstes Rathaus</td>
+                            <td id="dashTownhallDist" class="poi-value">-</td>
+                        </tr>
+                        <tr>
+                            <td class="poi-label">Nächster<br>Fernbahnhof</td>
+                            <td id="dashBahnhofDist" class="poi-value">-</td>
+                        </tr>
+                    </table>
+                </div>
+
+                <div class="data-panel">
+                    <div class="panel-title">Erreichbarkeit: Freizeit & Kultur</div>
+                    <table class="poi-table">
+                        <tr>
+                            <td class="poi-label">Nächstes Kino</td>
+                            <td id="dashCinemaDist" class="poi-value">-</td>
+                        </tr>
+                        <tr>
+                            <td class="poi-label">Nächstes Theater</td>
+                            <td id="dashTheatreDist" class="poi-value">-</td>
+                        </tr>
+                        <tr>
+                            <td class="poi-label">Nächster Zoo</td>
+                            <td id="dashZooDist" class="poi-value">-</td>
+                        </tr>
+                    </table>
                 </div>
 
                 <div class="data-panel">

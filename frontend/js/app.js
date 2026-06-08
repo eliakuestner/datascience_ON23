@@ -44,7 +44,6 @@ const coreHoursPlugin = {
             const xNachmittagsStart = getXPixel(16.0);
             const xNachmittagsEnd = getXPixel(18.5);
             if (xNachmittagsStart >= left && xNachmittagsEnd <= right) {
-                // HIER WURDE DER BUCHSTABENSALAT GEKILLT:
                 ctx.fillRect(xNachmittagsStart, top, xNachmittagsEnd - xNachmittagsStart, bottom - top);
             }
             ctx.restore();
@@ -109,7 +108,6 @@ async function loadGridData() {
         const maxVal = Math.max(...values, 1);
 
         kacheln.forEach(kachel => {
-            // Die sichere Zuweisung
             const kachelWert = (kachel.value !== undefined && kachel.value !== null) ? kachel.value : 0;
 
             const polygonPoints = [
@@ -126,7 +124,7 @@ async function loadGridData() {
                 color: "#C7CFE3",       
                 weight: 0.5,
                 fillColor: fillColor,
-                fillOpacity: fillOpacity, // HIER WAR DER FEHLER: Das falsche "value" wurde komplett entfernt!
+                fillOpacity: fillOpacity,
                 interactive: true
             });
 
@@ -134,7 +132,6 @@ async function loadGridData() {
             poly.defaultWeight = 0.5;
             poly.defaultFillOpacity = fillOpacity;
 
-            // --- INTERAKTIONS-LOGIK (HOVER & SELECTION) ---
             poly.on("mouseover", (e) => {
                 const layer = e.target;
                 if (layer !== selectedLayer) {
@@ -241,19 +238,30 @@ async function loadKachelDetails(kachelId) {
         if (!response.ok) throw new Error("Details konnten nicht geladen werden");
         const data = await response.json();
 
+        // Kachel-Stammdaten & Adresse befüllen
         safeSetText("dashKachelId", data.kachel_id);
+        safeSetText("dashAdresse", data.adresse || "Keine Adresse ermittelbar");
         safeSetText("dashEinwohner", (data.einwohner || 0).toLocaleString("de-DE"));
         safeSetText("dashZone", data.bevoelkerungs_klasse || "-");
         safeSetText("dashHaltestellen", data.anzahl_haltestellen || 0);
         safeSetText("dashLinien", data.linien_liste || "Keine Linien vorhanden");
 
-        safeSetText("dashHospital", data.nearest_hospital_name ? `${data.nearest_hospital_name} (${data.dist_hospital_km || 0} km)` : "Kein Eintrag");
-        safeSetText("dashTownhall", data.nearest_townhall_name ? `${data.nearest_townhall_name} (${data.dist_townhall_km || 0} km)` : "Kein Eintrag");
-        safeSetText("dashBahnhof", data.nearest_bahnhof_name ? `${data.nearest_bahnhof_name} (${data.dist_bahnhof_km || 0} km)` : "Kein Eintrag");
-        safeSetText("dashCinema", data.nearest_cinema_name ? `${data.nearest_cinema_name} (${data.dist_cinema_km || 0} km)` : "Kein Eintrag");
-        safeSetText("dashTheatre", data.nearest_theatre_name ? `${data.nearest_theatre_name} (${data.dist_theatre_km || 0} km)` : "Kein Eintrag");
-        safeSetText("dashZoo", data.nearest_zoo_name ? `${data.nearest_zoo_name} (${data.dist_zoo_km || 0} km)` : "Kein Eintrag");
+        // Formatierungsfunktion passend zum Screenshot: "Name (X.XX km)"
+        const formatPoi = (name, dist) => {
+            if (!name || name === "-" || name === "Kein Eintrag") return "-";
+            const distFormatiert = (typeof dist === 'number') ? dist.toLocaleString("de-DE", { minimumFractionDigits: 1, maximumFractionDigits: 2 }) : dist;
+            return `${name} (${distFormatiert} km)`;
+        };
 
+        // POI-Blöcke befüllen
+        safeSetText("dashHospitalDist", formatPoi(data.nearest_hospital_name, data.dist_hospital_km));
+        safeSetText("dashTownhallDist", formatPoi(data.nearest_townhall_name, data.dist_townhall_km));
+        safeSetText("dashBahnhofDist", formatPoi(data.nearest_bahnhof_name, data.dist_bahnhof_km));
+        safeSetText("dashCinemaDist", formatPoi(data.nearest_cinema_name, data.dist_cinema_km));
+        safeSetText("dashTheatreDist", formatPoi(data.nearest_theatre_name, data.dist_theatre_km));
+        safeSetText("dashZooDist", formatPoi(data.nearest_zoo_name, data.dist_zoo_km));
+
+        // 24h-Taktprofil aktualisieren
         rawHourlyDataFromDB = (data.takt_24h_array || "").split(",").map(Number);
         if (rawHourlyDataFromDB.length !== 24) rawHourlyDataFromDB = Array(24).fill(0);
         
