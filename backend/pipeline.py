@@ -6,8 +6,7 @@ from shapely.geometry import Polygon, Point
 from sqlalchemy import create_engine
 from dotenv import load_dotenv
 
-# STRIKTER FIX: Wir laden die .env exakt aus dem aktuellen Arbeitsverzeichnis, 
-# in dem du mit dem Terminal stehst (datascience_ON23). Keine Suche in Überordnern!
+# .env laden
 load_dotenv(os.path.join(os.getcwd(), '.env'))
 
 def get_db_engine():
@@ -23,36 +22,47 @@ def classify_zone(einwohner):
 
 def run_etl_pipeline():
     engine = get_db_engine()
-    print("🚀 Starte optimierte Karlsruher ETL-Pipeline...")
+    print("🚀 Starte optimierte Karlsruher ETL-Pipeline (Flächen-Match)...")
 
-    # --- SCHRITT A: GEOGRAFISCHER FILTER (MANTEL) ---
-    print("🗺️  Berechne Kachel-Eingrenzung aus ÖPNV-Stops...")
+    # --- SCHRITT A: GEOGRAFISCHE BASIS AUS ÖPNV-STOPS DEFINIEREN ---
+    print("🚌 Berechne Master-Grid ausschließlich aus ÖPNV-Haltestellen (Stadt + Landkreis)...")
     df_stops_raw = pd.read_sql("SELECT stop_id, stop_lat, stop_lon FROM public.stops", engine)
     gdf_stops_raw = gpd.GeoDataFrame(df_stops_raw, geometry=gpd.points_from_xy(df_stops_raw.stop_lon, df_stops_raw.stop_lat), crs="EPSG:4326").to_crs("EPSG:3035")
     
-    # Rasterkoordinaten direkt berechnen
+    # Rasterkoordinaten für die Haltestellen berechnen
     gdf_stops_raw['x_3k'] = (gdf_stops_raw.geometry.x // 3000) * 3000
     gdf_stops_raw['y_3k'] = (gdf_stops_raw.geometry.y // 3000) * 3000
     
-    region_mantel = gdf_stops_raw.geometry.union_all().convex_hull
+    # Das Master-Grid bestimmen: Nur Kacheln, in denen mindestens eine Haltestelle existiert
+    df_master_grid = gdf_stops_raw.groupby(['x_3k', 'y_3k']).size().reset_index(name='anzahl_haltestellen')
 
-    # --- SCHRITT B: RASTER-GRID GENERIERUNG ---
-    print("📐 Generiere 3x3km Planungs-Grid...")
+    # --- SCHRITT B: RASTER-GRID GENERIERUNG (GEOMETRIE) ---
+    print("📐 Generiere 3x3km Planungs-Polygone für das Zielgebiet...")
+    polygons = [
+        Polygon([(r['x_3k'], r['y_3k']), 
+                 (r['x_3k']+3000, r['y_3k']), 
+                 (r['x_3k']+3000, r['y_3k']+3000), 
+                 (r['x_3k'], r['y_3k']+3000)]) 
+        for _, r in df_master_grid.iterrows()
+    ]
+    gdf_grid = gpd.GeoDataFrame(df_master_grid, geometry=polygons, crs="EPSG:3035")
+    gdf_grid['kachel_id'] = gdf_grid.index + 1
+
+    # --- SCHRITT C: BEVÖLKERUNGSDATEN REIN-MAPPEN ---
+    print("👥 Ordne Zensus-Einwohnerexakt dem Haltestellen-Grid zu...")
     df_zensus_base = pd.read_sql("SELECT x_mp_1km, y_mp_1km, \"Einwohner\" as einwohner FROM public.zensus2022_bevoelkerungszahl", engine)
     
+    # Zensus-Koordinaten auf das gleiche 3km-Raster runden
     df_zensus_base['x_3k'] = ((df_zensus_base['x_mp_1km'] - 500) // 3000) * 3000
     df_zensus_base['y_3k'] = ((df_zensus_base['y_mp_1km'] - 500) // 3000) * 3000
     
-    df_grid_base = df_zensus_base.groupby(['x_3k', 'y_3k']).agg({'einwohner': 'sum'}).reset_index()
+    df_zensus_agg = df_zensus_base.groupby(['x_3k', 'y_3k']).agg({'einwohner': 'sum'}).reset_index()
     
-    polygons = [Polygon([(r['x_3k'], r['y_3k']), (r['x_3k']+3000, r['y_3k']), (r['x_3k']+3000, r['y_3k']+3000), (r['x_3k'], r['y_3k']+3000)]) for _, r in df_grid_base.iterrows()]
-    gdf_grid_all = gpd.GeoDataFrame(df_grid_base, geometry=polygons, crs="EPSG:3035")
-    
-    # Räumlicher Filter auf Karlsruhe
-    gdf_grid = gdf_grid_all[gdf_grid_all.geometry.intersects(region_mantel)].reset_index(drop=True)
-    gdf_grid['kachel_id'] = gdf_grid.index + 1
+    # Left-Join: Wir behalten NUR die Kacheln, die im Haltestellen-Mastergrid existieren
+    gdf_grid = gdf_grid.merge(df_zensus_agg, on=['x_3k', 'y_3k'], how='left')
+    gdf_grid['einwohner'] = gdf_grid['einwohner'].fillna(0).astype(int)
 
-    # --- SCHRITT C: BLITZSCHNELLE ECKPUNKT-BERECHNUNG ---
+    # --- SCHRITT D: BLITZSCHNELLE ECKPUNKT-BERECHNUNG ---
     print("🌍 Berechne Eckpunkte via Vektor-Transformation...")
     gdf_grid_wgs84 = gdf_grid.to_crs("EPSG:4326")
     p1_lats, p1_lons = [], []
@@ -73,7 +83,7 @@ def run_etl_pipeline():
     gdf_grid['p4_lat'] = p4_lats; gdf_grid['p4_lon'] = p4_lons
     gdf_grid['bevoelkerungs_klasse'] = gdf_grid['einwohner'].apply(classify_zone)
 
-    # --- SCHRITT D: POI-INTEGRATION ---
+    # --- SCHRITT E: POI-INTEGRATION ---
     print("🏥 Verknüpfe Infrastruktur-POIs...")
     df_pois = pd.read_sql("SELECT name, poi_type, \"X\" as x, \"Y\" as y FROM public.karlsruhe_pois_datensatz", engine)
     gdf_pois_wgs84 = gpd.GeoDataFrame(df_pois, geometry=gpd.points_from_xy(df_pois.x, df_pois.y), crs="EPSG:4326")
@@ -98,13 +108,8 @@ def run_etl_pipeline():
             gdf_grid[f'dist_{prefix}_km'] = None
             gdf_grid[f'nearest_{prefix}_name'] = "Kein Eintrag"
 
-    # --- SCHRITT E: HALTESTELLEN & LINIEN-AGGREGATION ---
-    print("🚌 Aggregiere ÖPNV-Liniennetzwerke (Optimiert)...")
-    
-    df_stops_count = gdf_stops_raw.groupby(['x_3k', 'y_3k']).size().reset_index(name='anzahl_haltestellen')
-    gdf_grid = gdf_grid.merge(df_stops_count, on=['x_3k', 'y_3k'], how='left')
-    gdf_grid['anzahl_haltestellen'] = gdf_grid['anzahl_haltestellen'].fillna(0).astype(int)
-
+    # --- SCHRITT F: LINIEN-AGGREGATION ---
+    print("🚌 Aggregiere ÖPNV-Liniennetzwerke...")
     query_lines = """
         SELECT DISTINCT st.stop_id, r.route_short_name 
         FROM public.stop_times st 
@@ -118,7 +123,7 @@ def run_etl_pipeline():
     gdf_grid = gdf_grid.merge(df_lines, on=['x_3k', 'y_3k'], how='left')
     gdf_grid['linien_liste'] = gdf_grid['linien_liste'].fillna("Keine Linien")
 
-    # --- SCHRITT F: TAKTFREQUENZEN & SCORE ---
+    # --- SCHRITT G: TAKTFREQUENZEN & SCORE ---
     print("📊 Berechne Taktfrequenzen und ÖPNV-Score...")
     gdf_grid['takt_pendler_morgens'] = gdf_grid['anzahl_haltestellen'] * 2.5 
     gdf_grid['takt_wochenende'] = gdf_grid['anzahl_haltestellen'] * 1.2
@@ -128,14 +133,14 @@ def run_etl_pipeline():
     max_takt = gdf_grid['takt_pendler_morgens'].max() if gdf_grid['takt_pendler_morgens'].max() > 0 else 1
     gdf_grid['oepnv_score'] = gdf_grid.apply(lambda r: round(((r['einwohner'] / max_einwohner) * 40) + ((r['takt_pendler_morgens'] / max_takt) * 60), 1), axis=1)
 
-    # --- SCHRITT G: SPEICHERN ---
-    print("💾 Befülle kachel_analytics...")
+    # --- SCHRITT H: SPEICHERN ---
+    print("💾 Befülle kachel_analytics neu...")
     df_final = pd.DataFrame(gdf_grid.drop(columns='geometry')).rename(columns={'x_3k': 'x_min', 'y_3k': 'y_min'})
     
     with engine.begin() as conn:
         conn.exec_driver_sql("DROP TABLE IF EXISTS public.kachel_analytics;")
     df_final.to_sql("kachel_analytics", engine, if_exists="replace", index=False)
-    print("🎉 ETL-Pipeline erfolgreich beendet!")
+    print("🎉 ETL-Pipeline erfolgreich beendet! Beide Layer matchen jetzt exakt.")
 
 if __name__ == "__main__":
     run_etl_pipeline()
