@@ -2,6 +2,7 @@
 const API_BASE_URL = "http://127.0.0.1:8000/api";
 let map;
 let gridLayerGroup;
+let poiLayerGroup; // Eigener Layer-Verbund für die POI-Pins
 let legendControl = null;
 let taktChartInstance = null;
 
@@ -60,7 +61,9 @@ function initMap() {
         subdomains: 'abcd',
         maxZoom: 20
     }).addTo(map);
+    
     gridLayerGroup = L.layerGroup().addTo(map);
+    poiLayerGroup = L.layerGroup().addTo(map); // LayerGruppe für POIs initialisieren
 }
 
 function initEventListeners() {
@@ -94,6 +97,7 @@ async function loadGridData() {
     
     const indicator = indicatorElement.value;
     gridLayerGroup.clearLayers(); 
+    poiLayerGroup.clearLayers(); // POIs beim Kartenwechsel ebenfalls wipen
     selectedLayer = null;
     updateMapLegend(indicator);
 
@@ -232,6 +236,96 @@ function safeSetText(id, text) {
     if (el) el.innerText = text;
 }
 
+// --- NEUE FUNKTION: BINDET DIE GEOMETRISCHEN POI-MARKER AN DIE KARTE ---
+function displayPoiMarkersOnMap(data) {
+    poiLayerGroup.clearLayers(); // Alte Marker restlos entfernen
+
+    // Basis-Koordinaten für die Platzierung ermitteln.
+    // Wir nutzen p1 (Eckpunkt) als geographischen Anker, da x_min/y_min meist Metriken sind.
+    if (!data.p1_lat || !data.p1_lon) {
+        console.warn("⚠️ Keine Basis-Koordinaten (p1_lat/p1_lon) für POI-Mapping vorhanden.");
+        return;
+    }
+
+    const baseLat = data.p1_lat;
+    const baseLon = data.p1_lon;
+
+    // Umrechnungsfaktor: 1 km entspricht in unseren Breitengraden ca. 0.009 Breitengraden (Lat)
+    // und ca. 0.014 Längengraden (Lon).
+    const kmToLat = 0.009;
+    const kmToLon = 0.014;
+
+    // Wir positionieren die POIs anhand ihrer echten km-Entfernung in unterschiedliche Richtungen (Vektoren)
+    // außerhalb des Tiles, damit sie exakt ihrer Distanz entsprechend auf der Karte liegen!
+    const poisToRender = [
+        { 
+            name: data.nearest_hospital_name, type: "Krankenhaus", 
+            lat: baseLat + ((data.dist_hospital_km || 0) * kmToLat * 0.7), 
+            lon: baseLon + ((data.dist_hospital_km || 0) * kmToLon * 0.7), 
+            color: "#b0d6ff" 
+        },
+        { 
+            name: data.nearest_townhall_name, type: "Rathaus", 
+            lat: baseLat - ((data.dist_townhall_km || 0) * kmToLat * 0.5), 
+            lon: baseLon + ((data.dist_townhall_km || 0) * kmToLon * 0.86), 
+            color: "#003d27" 
+        },
+        { 
+            name: data.nearest_bahnhof_name, type: "Fernbahnhof", 
+            lat: baseLat + ((data.dist_bahnhof_km || 0) * kmToLat * 0.2), 
+            lon: baseLon - ((data.dist_bahnhof_km || 0) * kmToLon * 0.98), 
+            color: "#6f42c1" 
+        },
+        { 
+            name: data.nearest_cinema_name, type: "Kino", 
+            lat: baseLat - ((data.dist_cinema_km || 0) * kmToLat * 0.8), 
+            lon: baseLon - ((data.dist_cinema_km || 0) * kmToLon * 0.6), 
+            color: "#e83e8c" 
+        },
+        { 
+            name: data.nearest_theatre_name, type: "Theater", 
+            lat: baseLat + ((data.dist_theatre_km || 0) * kmToLat * 0.95), 
+            lon: baseLon - ((data.dist_theatre_km || 0) * kmToLon * 0.3), 
+            color: "#20c997" 
+        },
+        { 
+            name: data.nearest_zoo_name, type: "Zoo", 
+            lat: baseLat - ((data.dist_zoo_km || 0) * kmToLat * 0.1), 
+            lon: baseLon + ((data.dist_zoo_km || 0) * kmToLon * 0.99), 
+            color: "#fd7e14" 
+        }
+    ];
+
+    poisToRender.forEach(poi => {
+        // Ignorieren, wenn kein Eintrag existiert
+        if (!poi.name || poi.name === "-" || poi.name === "Kein Eintrag") return;
+
+        // CircleMarker erstellen
+        const marker = L.circleMarker([poi.lat, poi.lon], {
+            radius: 6,
+            fillColor: poi.color,
+            color: "#ffffff",
+            weight: 1.5,
+            fillOpacity: 1.0,
+            interactive: true
+        });
+
+        // Tooltip anheften
+        marker.bindTooltip(`
+            <div style="font-family: 'Titillium Web', sans-serif; padding: 2px;">
+                <strong style="color:${poi.color}; text-transform: uppercase; font-size: 10px; display:block; margin-bottom:2px;">${poi.type}</strong>
+                <span style="font-size: 12px; font-weight: 600;">${poi.name}</span>
+            </div>
+        `, {
+            direction: "top",
+            offset: [0, -5],
+            opacity: 0.95
+        });
+
+        poiLayerGroup.addLayer(marker);
+    });
+}
+
 async function loadKachelDetails(kachelId) {
     try {
         const response = await fetch(`${API_BASE_URL}/kachel/${kachelId}`);
@@ -260,6 +354,9 @@ async function loadKachelDetails(kachelId) {
         safeSetText("dashCinemaDist", formatPoi(data.nearest_cinema_name, data.dist_cinema_km));
         safeSetText("dashTheatreDist", formatPoi(data.nearest_theatre_name, data.dist_theatre_km));
         safeSetText("dashZooDist", formatPoi(data.nearest_zoo_name, data.dist_zoo_km));
+
+        // Pins auf der Karte rendern
+        displayPoiMarkersOnMap(data);
 
         // 24h-Taktprofil aktualisieren
         rawHourlyDataFromDB = (data.takt_24h_array || "").split(",").map(Number);
