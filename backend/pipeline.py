@@ -29,7 +29,7 @@ def classify_zone(einwohner):
 
 def run_etl_pipeline():
     engine = get_db_engine()
-    print("🚀 Starte empirische Wochentags-Pipeline (Unique Trips Metrik)...")
+    print("🚀 Starte empirische Wochentags-Pipeline (Unique Trips & POI-Fix)...")
 
     # --- SCHRITT A & B: GRID GENERIERUNG ---
     df_stops_raw = pd.read_sql("SELECT stop_id, stop_lat, stop_lon FROM public.stops", engine)
@@ -66,9 +66,10 @@ def run_etl_pipeline():
 
     gdf_grid['bevoelkerungs_klasse'] = gdf_grid['einwohner'].apply(classify_zone)
 
-    # --- SCHRITT E: POI-INTEGRATION ---
-    df_pois = pd.read_sql("SELECT name, poi_type, \"X\" as x, \"Y\" as y FROM public.karlsruhe_pois_datensatz", engine)
-    gdf_pois_metric = gpd.GeoDataFrame(df_pois, geometry=gpd.points_from_xy(df_pois.x, df_pois.y), crs="EPSG:4326").to_crs("EPSG:3035")
+    # --- SCHRITT E: POI-INTEGRATION (FIXED KOORDINATEN) ---
+    print("📍 Integriere POIs mit ECHTEN Geokoordinaten...")
+    df_pois = pd.read_sql("SELECT name, poi_type, \"X\" as x_lon, \"Y\" as y_lat FROM public.karlsruhe_pois_datensatz", engine)
+    gdf_pois_metric = gpd.GeoDataFrame(df_pois, geometry=gpd.points_from_xy(df_pois.x_lon, df_pois.y_lat), crs="EPSG:4326").to_crs("EPSG:3035")
     gdf_centroids = gpd.GeoDataFrame(gdf_grid[['kachel_id']], geometry=gdf_grid.geometry.centroid, crs="EPSG:3035")
     
     for p_type, prefix in [('hospital', 'hospital'), ('townhall', 'townhall'), ('station', 'bahnhof'), ('cinema', 'cinema'), ('theatre', 'theatre'), ('zoo', 'zoo')]:
@@ -76,11 +77,15 @@ def run_etl_pipeline():
         if not sub_pois.empty:
             joined = gpd.sjoin_nearest(gdf_centroids, sub_pois, how='left', distance_col='dist_m').drop_duplicates(subset=['kachel_id'], keep='first')
             joined[f'dist_{prefix}_km'] = round(joined['dist_m'] / 1000.0, 2)
-            joined = joined.rename(columns={'name': f'nearest_{prefix}_name'})
-            gdf_grid = gdf_grid.merge(joined[['kachel_id', f'dist_{prefix}_km', f'nearest_{prefix}_name']], on='kachel_id', how='left')
+            joined = joined.rename(columns={'name': f'nearest_{prefix}_name', 'x_lon': f'{prefix}_lon', 'y_lat': f'{prefix}_lat'})
+            
+            # Jetzt joinen wir Distanz, Name UND die echten Koordinaten an das Grid
+            gdf_grid = gdf_grid.merge(joined[['kachel_id', f'dist_{prefix}_km', f'nearest_{prefix}_name', f'{prefix}_lon', f'{prefix}_lat']], on='kachel_id', how='left')
         else:
             gdf_grid[f'dist_{prefix}_km'] = 0.0
             gdf_grid[f'nearest_{prefix}_name'] = "Kein Eintrag"
+            gdf_grid[f'{prefix}_lon'] = 0.0
+            gdf_grid[f'{prefix}_lat'] = 0.0
 
     # --- SCHRITT F: LINIEN-AGGREGATION ---
     df_fahrten = pd.read_sql("SELECT DISTINCT st.stop_id, r.route_short_name FROM public.stop_times st INNER JOIN public.trips t ON st.trip_id = t.trip_id INNER JOIN public.routes r ON t.route_id = r.route_id", engine)
@@ -89,10 +94,8 @@ def run_etl_pipeline():
     gdf_grid = gdf_grid.merge(df_lines, on=['x_3k', 'y_3k'], how='left')
     gdf_grid['linien_liste'] = gdf_grid['linien_liste'].fillna("Keine Linien")
 
-    # --- SCHRITT G: EMPIRISCHE 24H-FAHRPLANDATEN BERECHNEN (UNIQUE TRIPS) ---
+    # --- SCHRITT G: EMPIRISCHE 24H-FAHRPLANDATEN BERECHNEN (UNIQUE TRIPS & MODULO FIX) ---
     print("📊 Berechne physische Fahrzeug-Frequenzen via Unique-Trip-ID...")
-    
-    # Wir brauchen die trip_id im Select, um gleich die Stations-Duplikate zu filtern
     query_takt = """
         SELECT st.stop_id, 
                t.trip_id,
@@ -104,35 +107,30 @@ def run_etl_pipeline():
     """
     try:
         df_real_takt = pd.read_sql(query_takt, engine)
-        print(f"   -> {len(df_real_takt)} Zeilen geladen. Verarbeite Kachel-Schnittmengen...")
         df_real_takt = df_real_takt.merge(gdf_stops_raw[['stop_id', 'x_3k', 'y_3k']], on='stop_id', how='inner')
         
         days_mapping = {
             'mo': 'monday', 'di': 'tuesday', 'mi': 'wednesday', 
             'do': 'thursday', 'fr': 'friday', 'sa': 'saturday', 'so': 'sunday'
         }
-        
         wochen_arrays = {tag: [] for tag in days_mapping.keys()}
         
         for _, row in gdf_grid.iterrows():
-                    x, y = row['x_3k'], row['y_3k']
-                    kachel_data = df_real_takt[(df_real_takt['x_3k'] == x) & (df_real_takt['y_3k'] == y)]
+            x, y = row['x_3k'], row['y_3k']
+            kachel_data = df_real_takt[(df_real_takt['x_3k'] == x) & (df_real_takt['y_3k'] == y)]
+            
+            for tag, db_spalte in days_mapping.items():
+                active_trips = kachel_data[kachel_data[db_spalte] == 1]
+                active_unique_vehicles = active_trips.drop_duplicates(subset=['abfahrts_stunde', 'trip_id'])
+                counts = active_unique_vehicles.groupby('abfahrts_stunde').size().to_dict()
+                
+                hours_profile = [0] * 24
+                for raw_h, count in counts.items():
+                    real_h = int(raw_h) % 24
+                    hours_profile[real_h] += int(count)
                     
-                    for tag, db_spalte in days_mapping.items():
-                        active_trips = kachel_data[kachel_data[db_spalte] == 1]
-                        
-                        active_unique_vehicles = active_trips.drop_duplicates(subset=['abfahrts_stunde', 'trip_id'])
-                        counts = active_unique_vehicles.groupby('abfahrts_stunde').size().to_dict()
-                        
-                        hours_profile = [0] * 24
-                        for raw_h, count in counts.items():
-                            # GTFS-Nachtstunden (24, 25, 26 etc.) via Modulo 24 auf den realen Tagesanfang mappen!
-                            real_h = int(raw_h) % 24
-                            hours_profile[real_h] += int(count)
-                            
-                        # In Strings konvertieren für das Datenbank-Array
-                        hours_profile_strs = [str(x) for x in hours_profile]
-                        wochen_arrays[tag].append(",".join(hours_profile_strs))
+                hours_profile_strs = [str(x) for x in hours_profile]
+                wochen_arrays[tag].append(",".join(hours_profile_strs))
                 
         for tag in days_mapping.keys():
             gdf_grid[f'takt_24h_{tag}'] = wochen_arrays[tag]
@@ -152,18 +150,40 @@ def run_etl_pipeline():
     gdf_grid = gdf_grid.merge(df_source_addresses, on='kachel_id', how='left')
     gdf_grid['adresse'] = gdf_grid['adresse'].fillna("Bereich Karlsruhe")
 
-    # --- SCHRITT I: SPEICHERN ---
+# --- SCHRITT I: SPEICHERN ---
     print("💾 Überschreibe public.kachel_analytics...")
-    df_final = pd.DataFrame(gdf_grid.drop(columns='geometry')).rename(columns={'x_3k': 'x_min', 'y_3k': 'y_min'})
     
+    # Explizites Sicherstellen, dass alle Eckpunkte und die neuen POI-Daten im finalen Export landen
+    export_columns = [
+        'kachel_id', 'x_min', 'y_min', 'anzahl_haltestellen', 'einwohner', 'bevoelkerungs_klasse', 'adresse', 'linien_liste',
+        'p1_lat', 'p1_lon', 'p2_lat', 'p2_lon', 'p3_lat', 'p3_lon', 'p4_lat', 'p4_lon',
+        'takt_24h_mo', 'takt_24h_di', 'takt_24h_mi', 'takt_24h_do', 'takt_24h_fr', 'takt_24h_sa', 'takt_24h_so',
+        'takt_pendler_morgens', 'takt_wochenende',
+        'dist_hospital_km', 'nearest_hospital_name', 'hospital_lon', 'hospital_lat',
+        'dist_townhall_km', 'nearest_townhall_name', 'townhall_lon', 'townhall_lat',
+        'dist_bahnhof_km', 'nearest_bahnhof_name', 'bahnhof_lon', 'bahnhof_lat',
+        'dist_cinema_km', 'nearest_cinema_name', 'cinema_lon', 'cinema_lat',
+        'dist_theatre_km', 'nearest_theatre_name', 'theatre_lon', 'theatre_lat',
+        'dist_zoo_km', 'nearest_zoo_name', 'zoo_lon', 'zoo_lat'
+    ]
+    
+    df_final = pd.DataFrame(gdf_grid).rename(columns={'x_3k': 'x_min', 'y_3k': 'y_min'})
+    
+    # Berechne den Score
     max_einwohner = df_final['einwohner'].max() if df_final['einwohner'].max() > 0 else 1
     max_takt = df_final['takt_pendler_morgens'].max() if df_final['takt_pendler_morgens'].max() > 0 else 1
     df_final['oepnv_score'] = df_final.apply(lambda r: round(((r['einwohner'] / max_einwohner) * 40) + ((r['takt_pendler_morgens'] / max_takt) * 60), 1), axis=1)
+    
+    # Füge den Score zu den Export-Spalten hinzu
+    export_columns.append('oepnv_score')
+    
+    # Nur die Spalten exportieren, die wirklich existieren und gebraucht werden
+    df_final = df_final[[col for col in export_columns if col in df_final.columns]]
 
     with engine.begin() as conn:
         conn.exec_driver_sql("DROP TABLE IF EXISTS public.kachel_analytics;")
     df_final.to_sql("kachel_analytics", engine, if_exists="replace", index=False)
-    print("🎉 ETL-Pipeline erfolgreich beendet!")
+    print("🎉 ETL-Pipeline erfolgreich beendet! Alle Eckpunkte und POI-Koordinaten sind sicher in der DB.")
 
 if __name__ == "__main__":
     run_etl_pipeline()

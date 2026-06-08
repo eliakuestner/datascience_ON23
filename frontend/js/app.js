@@ -14,7 +14,7 @@ document.addEventListener("DOMContentLoaded", () => {
     initMap();
     initEventListeners();
     loadGridData();
-    updateTaktChart(rawHourlyDataFromDB, 'mo');
+    updateTaktChart('mo');
 });
 
 const coreHoursPlugin = {
@@ -62,8 +62,9 @@ function initMap() {
         maxZoom: 20
     }).addTo(map);
     
+    // Wir nutzen die native Layer-Reihenfolge – ganz ohne blockierende Panes!
     gridLayerGroup = L.layerGroup().addTo(map);
-    poiLayerGroup = L.layerGroup().addTo(map); // LayerGruppe für POIs initialisieren
+    poiLayerGroup = L.layerGroup().addTo(map); 
 }
 
 function initEventListeners() {
@@ -87,7 +88,7 @@ function initEventListeners() {
         btn.style.color = '#ffffff';
 
         const selectedDay = btn.getAttribute('data-day') || 'mo';
-updateTaktChart(selectedDay);
+        updateTaktChart(selectedDay);
     });
 }
 
@@ -145,6 +146,9 @@ async function loadGridData() {
                         fillOpacity: Math.min(layer.defaultFillOpacity + 0.15, 0.95)
                     });
                     layer.bringToFront();
+                    
+                    // Schiebt die POI-Marker sofort wieder über die gehoverte Kachel
+                    poiLayerGroup.eachLayer(marker => marker.bringToFront());
                 }
             });
 
@@ -165,6 +169,9 @@ async function loadGridData() {
                 selectedLayer = layer;
                 layer.setStyle({ color: "#1a1a1a", weight: 2.5, fillOpacity: layer.defaultFillOpacity });
                 layer.bringToFront();
+
+                // Holt die POI-Marker auch nach dem Klicken der Kachel in den Vordergrund
+                poiLayerGroup.eachLayer(marker => marker.bringToFront());
 
                 loadKachelDetails(kachel.kachel_id);
             });
@@ -236,81 +243,32 @@ function safeSetText(id, text) {
     if (el) el.innerText = text;
 }
 
-// --- NEUE FUNKTION: BINDET DIE GEOMETRISCHEN POI-MARKER AN DIE KARTE ---
 function displayPoiMarkersOnMap(data) {
-    poiLayerGroup.clearLayers(); // Alte Marker restlos entfernen
+    // 1. Unwiderruflich alle alten POI-Marker von der Karte fegen
+    poiLayerGroup.clearLayers(); 
 
-    // Basis-Koordinaten für die Platzierung ermitteln.
-    // Wir nutzen p1 (Eckpunkt) als geographischen Anker, da x_min/y_min meist Metriken sind.
-    if (!data.p1_lat || !data.p1_lon) {
-        console.warn("⚠️ Keine Basis-Koordinaten (p1_lat/p1_lon) für POI-Mapping vorhanden.");
-        return;
-    }
-
-    const baseLat = data.p1_lat;
-    const baseLon = data.p1_lon;
-
-    // Umrechnungsfaktor: 1 km entspricht in unseren Breitengraden ca. 0.009 Breitengraden (Lat)
-    // und ca. 0.014 Längengraden (Lon).
-    const kmToLat = 0.009;
-    const kmToLon = 0.014;
-
-    // Wir positionieren die POIs anhand ihrer echten km-Entfernung in unterschiedliche Richtungen (Vektoren)
-    // außerhalb des Tiles, damit sie exakt ihrer Distanz entsprechend auf der Karte liegen!
     const poisToRender = [
-        { 
-            name: data.nearest_hospital_name, type: "Krankenhaus", 
-            lat: baseLat + ((data.dist_hospital_km || 0) * kmToLat * 0.7), 
-            lon: baseLon + ((data.dist_hospital_km || 0) * kmToLon * 0.7), 
-            color: "#b0d6ff" 
-        },
-        { 
-            name: data.nearest_townhall_name, type: "Rathaus", 
-            lat: baseLat - ((data.dist_townhall_km || 0) * kmToLat * 0.5), 
-            lon: baseLon + ((data.dist_townhall_km || 0) * kmToLon * 0.86), 
-            color: "#003d27" 
-        },
-        { 
-            name: data.nearest_bahnhof_name, type: "Fernbahnhof", 
-            lat: baseLat + ((data.dist_bahnhof_km || 0) * kmToLat * 0.2), 
-            lon: baseLon - ((data.dist_bahnhof_km || 0) * kmToLon * 0.98), 
-            color: "#6f42c1" 
-        },
-        { 
-            name: data.nearest_cinema_name, type: "Kino", 
-            lat: baseLat - ((data.dist_cinema_km || 0) * kmToLat * 0.8), 
-            lon: baseLon - ((data.dist_cinema_km || 0) * kmToLon * 0.6), 
-            color: "#e83e8c" 
-        },
-        { 
-            name: data.nearest_theatre_name, type: "Theater", 
-            lat: baseLat + ((data.dist_theatre_km || 0) * kmToLat * 0.95), 
-            lon: baseLon - ((data.dist_theatre_km || 0) * kmToLon * 0.3), 
-            color: "#20c997" 
-        },
-        { 
-            name: data.nearest_zoo_name, type: "Zoo", 
-            lat: baseLat - ((data.dist_zoo_km || 0) * kmToLat * 0.1), 
-            lon: baseLon + ((data.dist_zoo_km || 0) * kmToLon * 0.99), 
-            color: "#fd7e14" 
-        }
+        { name: data.nearest_hospital_name, type: "Krankenhaus", lat: parseFloat(data.hospital_lat), lon: parseFloat(data.hospital_lon), color: "#b0d6ff" },
+        { name: data.nearest_townhall_name, type: "Rathaus", lat: parseFloat(data.townhall_lat), lon: parseFloat(data.townhall_lon), color: "#003d27" },
+        { name: data.nearest_bahnhof_name, type: "Fernbahnhof", lat: parseFloat(data.bahnhof_lat), lon: parseFloat(data.bahnhof_lon), color: "#6f42c1" },
+        { name: data.nearest_cinema_name, type: "Kino", lat: parseFloat(data.cinema_lat), lon: parseFloat(data.cinema_lon), color: "#e83e8c" },
+        { name: data.nearest_theatre_name, type: "Theater", lat: parseFloat(data.theatre_lat), lon: parseFloat(data.theatre_lon), color: "#20c997" },
+        { name: data.nearest_zoo_name, type: "Zoo", lat: parseFloat(data.zoo_lat), lon: parseFloat(data.zoo_lon), color: "#fd7e14" }
     ];
 
     poisToRender.forEach(poi => {
-        // Ignorieren, wenn kein Eintrag existiert
-        if (!poi.name || poi.name === "-" || poi.name === "Kein Eintrag") return;
+        if (!poi.name || poi.name === "-" || poi.name === "Kein Eintrag" || isNaN(poi.lat) || isNaN(poi.lon) || poi.lat === 0) return;
 
-        // CircleMarker erstellen
+        // Erstelle den Marker nativ auf der Standard-Ebene mit voller Interaktivität
         const marker = L.circleMarker([poi.lat, poi.lon], {
             radius: 6,
             fillColor: poi.color,
             color: "#ffffff",
             weight: 1.5,
             fillOpacity: 1.0,
-            interactive: true
+            interactive: true 
         });
 
-        // Tooltip anheften
         marker.bindTooltip(`
             <div style="font-family: 'Titillium Web', sans-serif; padding: 2px;">
                 <strong style="color:${poi.color}; text-transform: uppercase; font-size: 10px; display:block; margin-bottom:2px;">${poi.type}</strong>
@@ -319,14 +277,17 @@ function displayPoiMarkersOnMap(data) {
         `, {
             direction: "top",
             offset: [0, -5],
-            opacity: 0.95
+            opacity: 0.95,
+            sticky: false 
         });
 
         poiLayerGroup.addLayer(marker);
     });
+
+    // Holt alle frisch gerenderten Marker direkt an die Spitze der Anzeige-Hierarchie
+    poiLayerGroup.eachLayer(marker => marker.bringToFront());
 }
 
-// Globale Variable speichert jetzt das komplette Wochen-Paket der Kachel
 let currentTileTaktData = null;
 
 async function loadKachelDetails(kachelId) {
@@ -335,7 +296,6 @@ async function loadKachelDetails(kachelId) {
         if (!response.ok) throw new Error("Details konnten nicht geladen werden");
         const data = await response.json();
 
-        // Backup der gesamten Wochentagsdaten im Speicher ablegen
         currentTileTaktData = data;
 
         safeSetText("dashKachelId", data.kachel_id);
@@ -360,7 +320,6 @@ async function loadKachelDetails(kachelId) {
 
         displayPoiMarkersOnMap(data);
 
-        // Standardmäßig den aktiven Wochentag oder Montag zeichnen
         const activeBtn = document.querySelector('.day-btn.active') || document.querySelector('.day-btn[data-day="mo"]');
         const selectedDay = activeBtn ? (activeBtn.getAttribute('data-day') || 'mo') : 'mo';
         
@@ -376,7 +335,6 @@ function updateTaktChart(activeDay) {
     const ctx = canvasElement.getContext("2d");
     if (taktChartInstance !== null) taktChartInstance.destroy();
 
-    // 1. STATISCHE SKALIERUNG BERECHNEN:
     let globalMax = 0;
     ['mo', 'di', 'mi', 'do', 'fr', 'sa', 'so'].forEach(tag => {
         const rawString = currentTileTaktData[`takt_24h_${tag}`] || currentTileTaktData[`takt_24h_array`] || "";
@@ -386,10 +344,8 @@ function updateTaktChart(activeDay) {
         }
     });
 
-    // Sicherheitsnetz gegen Nachkommastellen auf der Y-Achse
     const fixedYAxisMax = globalMax > 2 ? Math.ceil(globalMax * 1.2) : 10;
 
-    // 2. EMPIRISCHES ARRAY FÜR DEN GEWÄHLTEN WOCHENTAG LADEN:
     const dbSpaltenName = `takt_24h_${activeDay}`;
     const valString = currentTileTaktData[dbSpaltenName] || currentTileTaktData[`takt_24h_array`] || "";
     let processedData = valString.split(",").map(Number);

@@ -50,18 +50,16 @@ app.add_middleware(
 DETAIL_COLUMNS = [
     "kachel_id", "x_min", "y_min", "einwohner", "bevoelkerungs_klasse", "adresse",
     "p1_lat", "p1_lon", "p2_lat", "p2_lon", "p3_lat", "p3_lon", "p4_lat", "p4_lon",
-    "dist_hospital_km", "nearest_hospital_name",
-    "dist_townhall_km", "nearest_townhall_name",
-    "dist_bahnhof_km", "nearest_bahnhof_name",
-    "dist_cinema_km", "nearest_cinema_name",
-    "dist_theatre_km", "nearest_theatre_name",
-    "dist_zoo_km", "nearest_zoo_name",
+    "dist_hospital_km", "nearest_hospital_name", "hospital_lon", "hospital_lat",
+    "dist_townhall_km", "nearest_townhall_name", "townhall_lon", "townhall_lat",
+    "dist_bahnhof_km", "nearest_bahnhof_name", "bahnhof_lon", "bahnhof_lat",
+    "dist_cinema_km", "nearest_cinema_name", "cinema_lon", "cinema_lat",
+    "dist_theatre_km", "nearest_theatre_name", "theatre_lon", "theatre_lat",
+    "dist_zoo_km", "nearest_zoo_name", "zoo_lon", "zoo_lat",
     "anzahl_haltestellen", "linien_liste",
     "takt_pendler_morgens", "takt_wochenende", "oepnv_score",
-    # DIE NEUEN WOCHENTAGS-ARRAYS:
     "takt_24h_mo", "takt_24h_di", "takt_24h_mi", "takt_24h_do", "takt_24h_fr", "takt_24h_sa", "takt_24h_so"
 ]
-
 
 def _validate_indicator(indicator: str) -> str:
     # Verknüpft die Dropdown-Werte aus app.js direkt mit euren DB-Spalten
