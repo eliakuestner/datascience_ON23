@@ -8,6 +8,46 @@
             border-radius: 0px !important;
         }
 
+
+        /* --- NEUES AUTOMATISCHES POI-SYSTEM (FLAT DESIGN) --- */
+.poi-container {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 8px;
+}
+
+.poi-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 0;
+    border-bottom: 1px solid #f0f0f0;
+    gap: 16px; /* Blockiert das Zusammenrutschen */
+}
+
+.poi-row:last-child {
+    border-bottom: none;
+}
+
+.poi-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: #1a1a1a;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis; /* Verleiht langen Namen ein sauberes '...' */
+    flex: 1;
+}
+
+.poi-distance {
+    font-size: 13px;
+    font-weight: 700;
+    color: #E3000B; /* Würth-Rot */
+    white-space: nowrap;
+    flex-shrink: 0; /* Verhindert das Stauchen eurer Kilometer */
+    font-variant-numeric: tabular-nums; /* Exakte Bündigkeit */
+}
         html, body {
             height: 100%;
             overflow: hidden;

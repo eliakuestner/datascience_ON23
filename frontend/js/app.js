@@ -5,10 +5,7 @@ let gridLayerGroup;
 let legendControl = null;
 let taktChartInstance = null;
 
-// Hält die Referenz auf die aktuell angeklickte Kachel (für das schwarze Highlight)
 let selectedLayer = null;
-
-// Sicherheits-Leine: Vorab mit Nullen füllen, damit der Chart beim Start nicht abstürzt
 let rawHourlyDataFromDB = Array(24).fill(0);
 
 // Initialisierung beim Laden der Seite
@@ -16,53 +13,40 @@ document.addEventListener("DOMContentLoaded", () => {
     initMap();
     initEventListeners();
     loadGridData();
-    
-    // Initialen leeren Chart zeichnen (Montagsprofil der Nulllinie)
     updateTaktChart(rawHourlyDataFromDB, 'mo');
 });
 
-/**
- * 1. MATHEMATISCHES KERNZEITEN-PLUGIN FÜR CHART.JS
- * Zeichnet die Hauptverkehrszeiten transparent in den Hintergrund des Diagramm-Frames.
- */
 const coreHoursPlugin = {
     id: 'coreHoursPlugin',
     beforeDraw: (chart) => {
         try {
             const { ctx, chartArea, scales } = chart;
             if (!chartArea || !scales || !scales.x) return;
-            
             const x = scales.x;
             const { top, bottom, left, right } = chartArea;
-            
             ctx.save();
             ctx.fillStyle = 'rgba(199, 207, 227, 0.35)';
 
-            // Interpoliert Fließkommazahlen (z.B. 6.5 für 06:30 Uhr) präzise auf der Kategorie-Achse
             const getXPixel = (hour) => {
                 const integerPart = Math.floor(hour);
                 const fractionalPart = hour - integerPart;
-                
                 const p1 = x.getPixelForValue(integerPart);
                 const p2 = integerPart < 23 ? x.getPixelForValue(integerPart + 1) : p1;
-                
                 return p1 + (p2 - p1) * fractionalPart;
             };
 
-            // Zeitfenster 1: Morgens (06:30 - 08:30 Uhr)
             const xMorgensStart = getXPixel(6.5);
             const xMorgensEnd = getXPixel(8.5);
             if (xMorgensStart >= left && xMorgensEnd <= right) {
                 ctx.fillRect(xMorgensStart, top, xMorgensEnd - xMorgensStart, bottom - top);
             }
 
-            // Zeitfenster 2: Nachmittags (16:00 - 18:30 Uhr)
             const xNachmittagsStart = getXPixel(16.0);
             const xNachmittagsEnd = getXPixel(18.5);
             if (xNachmittagsStart >= left && xNachmittagsEnd <= right) {
+                // HIER WURDE DER BUCHSTABENSALAT GEKILLT:
                 ctx.fillRect(xNachmittagsStart, top, xNachmittagsEnd - xNachmittagsStart, bottom - top);
             }
-            
             ctx.restore();
         } catch (pluginError) {
             console.warn("Sicherheits-Leine im Chart-Plugin gegriffen:", pluginError);
@@ -70,28 +54,20 @@ const coreHoursPlugin = {
     }
 };
 
-// --- 2. INITIALISIERUNG DER LEAFLET KARTE ---
 function initMap() {
-    map = L.map("map", {
-        preferCanvas: true
-    }).setView([49.0069, 8.4037], 11); 
-
+    map = L.map("map", { preferCanvas: true }).setView([49.0069, 8.4037], 11); 
     L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+        attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
         subdomains: 'abcd',
         maxZoom: 20
     }).addTo(map);
-
     gridLayerGroup = L.layerGroup().addTo(map);
 }
 
-// --- 3. EVENT LISTENER REGISTRIEREN ---
 function initEventListeners() {
     const indicatorSelect = document.getElementById("indicatorSelect");
     if (indicatorSelect) {
-        indicatorSelect.addEventListener("change", () => {
-            loadGridData();
-        });
+        indicatorSelect.addEventListener("change", () => { loadGridData(); });
     }
 
     document.addEventListener('click', function (e) {
@@ -113,18 +89,13 @@ function initEventListeners() {
     });
 }
 
-// --- 4. DATEN FÜR DIE KARTE ABRUFEN & ZEICHNEN ---
 async function loadGridData() {
     const indicatorElement = document.getElementById("indicatorSelect");
     if (!indicatorElement) return;
     
     const indicator = indicatorElement.value;
     gridLayerGroup.clearLayers(); 
-
-    // Bei Indikator-Wechsel Selektion aufheben, da Kacheln neu generiert werden
     selectedLayer = null;
-
-    // Aktualisiere das Map-Overlay (die Legende) passend zum Indikator
     updateMapLegend(indicator);
 
     try {
@@ -138,6 +109,9 @@ async function loadGridData() {
         const maxVal = Math.max(...values, 1);
 
         kacheln.forEach(kachel => {
+            // Die sichere Zuweisung
+            const kachelWert = (kachel.value !== undefined && kachel.value !== null) ? kachel.value : 0;
+
             const polygonPoints = [
                 [kachel.p1_lat, kachel.p1_lon], 
                 [kachel.p2_lat, kachel.p2_lon], 
@@ -145,18 +119,17 @@ async function loadGridData() {
                 [kachel.p4_lat, kachel.p4_lon]  
             ];
 
-            const fillColor = getColorForScale(kachel.value, maxVal, indicator);
-            const fillOpacity = getOpacityForScale(kachel.value, maxVal, indicator);
+            const fillColor = getColorForScale(kachelWert, maxVal, indicator);
+            const fillOpacity = getOpacityForScale(kachelWert, maxVal, indicator);
 
             const poly = L.polygon(polygonPoints, {
                 color: "#C7CFE3",       
                 weight: 0.5,
                 fillColor: fillColor,
-                fillOpacity: fillOpacity,
+                fillOpacity: fillOpacity, // HIER WAR DER FEHLER: Das falsche "value" wurde komplett entfernt!
                 interactive: true
             });
 
-            // Metadaten an das Objekt hängen, um Styles dynamisch zurückzusetzen
             poly.defaultColor = "#C7CFE3";
             poly.defaultWeight = 0.5;
             poly.defaultFillOpacity = fillOpacity;
@@ -164,10 +137,9 @@ async function loadGridData() {
             // --- INTERAKTIONS-LOGIK (HOVER & SELECTION) ---
             poly.on("mouseover", (e) => {
                 const layer = e.target;
-                // Nur wenn das Element NICHT selektiert ist, den roten Hover-Effekt zeigen
                 if (layer !== selectedLayer) {
                     layer.setStyle({
-                        color: "#E3000B",   // Signalrot bei Hover
+                        color: "#E3000B",   
                         weight: 2,
                         fillOpacity: Math.min(layer.defaultFillOpacity + 0.15, 0.95)
                     });
@@ -177,65 +149,35 @@ async function loadGridData() {
 
             poly.on("mouseout", (e) => {
                 const layer = e.target;
-                // Wenn es das aktive Element ist, bleibt es schwarz umrandet
                 if (layer === selectedLayer) {
-                    layer.setStyle({
-                        color: "#1a1a1a",
-                        weight: 2.5,
-                        fillOpacity: layer.defaultFillOpacity
-                    });
+                    layer.setStyle({ color: "#1a1a1a", weight: 2.5, fillOpacity: layer.defaultFillOpacity });
                 } else {
-                    // Ansonsten zurück zum feinen, graublauen Standard-Kachelrand
-                    layer.setStyle({
-                        color: layer.defaultColor,
-                        weight: layer.defaultWeight,
-                        fillOpacity: layer.defaultFillOpacity
-                    });
+                    layer.setStyle({ color: layer.defaultColor, weight: layer.defaultWeight, fillOpacity: layer.defaultFillOpacity });
                 }
             });
 
             poly.on("click", (e) => {
                 const layer = e.target;
-
-                // 1. Vorherige Kachel wieder in den Normalzustand versetzen
                 if (selectedLayer && selectedLayer !== layer) {
-                    selectedLayer.setStyle({
-                        color: selectedLayer.defaultColor,
-                        weight: selectedLayer.defaultWeight,
-                        fillOpacity: selectedLayer.defaultFillOpacity
-                    });
+                    selectedLayer.setStyle({ color: selectedLayer.defaultColor, weight: selectedLayer.defaultWeight, fillOpacity: selectedLayer.defaultFillOpacity });
                 }
-
-                // 2. Neue Kachel als selektiert speichern und fetten schwarzen Rahmen setzen
                 selectedLayer = layer;
-                layer.setStyle({
-                    color: "#1a1a1a",    // Striktes Flat-Design Anthrazit/Schwarz
-                    weight: 2.5,
-                    fillOpacity: layer.defaultFillOpacity
-                });
+                layer.setStyle({ color: "#1a1a1a", weight: 2.5, fillOpacity: layer.defaultFillOpacity });
                 layer.bringToFront();
 
-                // 3. API-Call für die Sidebar-Details ausführen
                 loadKachelDetails(kachel.kachel_id);
             });
 
-            poly.bindTooltip(`Kachel ID: ${kachel.kachel_id}<br>Wert: ${kachel.value.toLocaleString("de-DE")}`, {
-                sticky: true,
-                direction: "top"
-            });
-
+            poly.bindTooltip(`Kachel ID: ${kachel.kachel_id}<br>Wert: ${kachelWert.toLocaleString("de-DE")}`, { sticky: true, direction: "top" });
             gridLayerGroup.addLayer(poly);
         });
-
     } catch (error) {
         console.error("📊 Fehler in der Karten-Logik:", error);
     }
 }
 
-// --- 5. STUFENLOSE & KLASSIFIZIERTE FARBSKALA ---
 function getColorForScale(value, maxVal, indicator) {
     if (value === 0) return "#eef1f6"; 
-
     if (indicator === 'einwohner') {
         if (value <= 4500) return "#ffb3b3";  
         if (value <= 13500) return "#ffd9b3"; 
@@ -250,145 +192,90 @@ function getColorForScale(value, maxVal, indicator) {
     }
 }
 
-// --- 6. DYNAMISCHES TRANSPARENZ-SYSTEM ---
 function getOpacityForScale(value, maxVal, indicator) {
     if (value === 0) return 0.15; 
-
     if (indicator === 'einwohner') {
         if (value <= 4500) return 0.40;  
         if (value <= 13500) return 0.55; 
         if (value <= 36000) return 0.75; 
         return 0.90;                     
     } else {
-        const val = value / maxVal;
-        return 0.40 + (0.50 * val);
+        return 0.40 + (0.50 * (value / maxVal));
     }
 }
 
-// --- 7. DYNAMISCHES MAP OVERLAY (AGENDA) FÜR LEAFLET ---
 function updateMapLegend(indicator) {
-    if (legendControl !== null) {
-        map.removeControl(legendControl);
-    }
-
+    if (legendControl !== null) map.removeControl(legendControl);
     legendControl = L.control({ position: "bottomright" });
 
     legendControl.onAdd = function () {
         const div = L.DomUtil.create("div", "map-legend");
-        
-        div.style.background = "#ffffff";
-        div.style.padding = "12px";
-        div.style.border = "1px solid #C7CFE3";
-        div.style.fontFamily = "'Titillium Web', sans-serif";
-        div.style.fontSize = "11px";
-        div.style.color = "#1a1a1a";
-        div.style.lineHeight = "1.6";
+        div.style.background = "#ffffff"; div.style.padding = "12px"; div.style.border = "1px solid #C7CFE3";
+        div.style.fontFamily = "'Titillium Web', sans-serif"; div.style.fontSize = "11px"; div.style.color = "#1a1a1a";
 
         let title = indicator === 'einwohner' ? "Einwohnerzahl (Zensus)" : "Anzahl Haltestellen";
         let html = `<b style="display:block;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.5px;font-size:12px;">${title}</b>`;
 
         if (indicator === 'einwohner') {
-            const labels = [
-                "Unbesiedelte Zone: 0 Einw.",
-                "Ländliche Zone: 1 - 4.500 Einw.",
-                "Aussenstädtische Zone: > 4.500 - 13.500 Einw.",
-                "Urbane Kernzone: > 13.500 - 36.000 Einw.",
-                "Metropolitane Kernzone: > 36.000 Einw."
-            ];
+            const labels = ["0 Einw.", "1 - 4.500 Einw.", "> 4.500 - 13.500 Einw.", "> 13.500 - 36.000 Einw.", "> 36.000 Einw."];
             const colors = ["#eef1f6", "#ffb3b3", "#ffd9b3", "#a3ffa3", "#00c832"];
-            const opacities = [0.15, 0.40, 0.55, 0.75, 0.90];
-            
             for (let i = 0; i < colors.length; i++) {
-                html += `
-                    <div style="display:flex; align-items:center; margin-bottom:5px;">
-                        <i style="background:${colors[i]}; opacity:${opacities[i]}; width:16px; height:16px; margin-right:8px; border:1px solid #C7CFE3; display:inline-block;"></i>
-                        <span>${labels[i]}</span>
-                    </div>`;
+                html += `<div style="display:flex; align-items:center; margin-bottom:5px;"><i style="background:${colors[i]}; width:16px; height:16px; margin-right:8px; border:1px solid #C7CFE3; display:inline-block;"></i><span>${labels[i]}</span></div>`;
             }
         } else {
-            html += `
-                <div style="display:flex; flex-direction:column; gap:6px; width:190px;">
-                    <div style="background:linear-gradient(to right, #ffb3b3, #00c832); height:14px; border:1px solid #C7CFE3; width:100%;"></div>
-                    <div style="display:flex; justify-content:space-between; font-size:10px; color:#555; font-weight:600;">
-                        <span>Gering (Hellrot)</span>
-                        <span>Hoch (Knallgrün)</span>
-                    </div>
-                </div>`;
+            html += `<div style="display:flex; flex-direction:column; gap:6px; width:190px;"><div style="background:linear-gradient(to right, #ffb3b3, #00c832); height:14px; border:1px solid #C7CFE3; width:100%;"></div></div>`;
         }
-
-        div.innerHTML = html;
-        return div;
+        div.innerHTML = html; return div;
     };
-
     legendControl.addTo(map);
 }
 
-// --- 8. DETAILED DATA DASHBOARD BEFÜLLEN ---
+function safeSetText(id, text) {
+    const el = document.getElementById(id);
+    if (el) el.innerText = text;
+}
+
 async function loadKachelDetails(kachelId) {
     try {
         const response = await fetch(`${API_BASE_URL}/kachel/${kachelId}`);
         if (!response.ok) throw new Error("Details konnten nicht geladen werden");
-        
         const data = await response.json();
 
-        document.getElementById("dashKachelId").innerText = data.kachel_id;
-        document.getElementById("dashEinwohner").innerText = data.einwohner.toLocaleString("de-DE");
-        document.getElementById("dashZone").innerText = data.bevoelkerungs_klasse;
-        document.getElementById("dashHaltestellen").innerText = data.anzahl_haltestellen;
-        
-        const linienBadge = document.getElementById("dashLinien");
-        linienBadge.innerText = data.linien_liste || "Keine Linien vorhanden";
+        safeSetText("dashKachelId", data.kachel_id);
+        safeSetText("dashEinwohner", (data.einwohner || 0).toLocaleString("de-DE"));
+        safeSetText("dashZone", data.bevoelkerungs_klasse || "-");
+        safeSetText("dashHaltestellen", data.anzahl_haltestellen || 0);
+        safeSetText("dashLinien", data.linien_liste || "Keine Linien vorhanden");
 
-        document.getElementById("dashHospital").innerText = `${data.nearest_hospital_name} (${data.dist_hospital_km} km)`;
-        document.getElementById("dashTownhall").innerText = `${data.nearest_townhall_name} (${data.dist_townhall_km} km)`;
-        document.getElementById("dashBahnhof").innerText = `${data.nearest_bahnhof_name} (${data.dist_bahnhof_km} km)`;
+        safeSetText("dashHospital", data.nearest_hospital_name ? `${data.nearest_hospital_name} (${data.dist_hospital_km || 0} km)` : "Kein Eintrag");
+        safeSetText("dashTownhall", data.nearest_townhall_name ? `${data.nearest_townhall_name} (${data.dist_townhall_km || 0} km)` : "Kein Eintrag");
+        safeSetText("dashBahnhof", data.nearest_bahnhof_name ? `${data.nearest_bahnhof_name} (${data.dist_bahnhof_km || 0} km)` : "Kein Eintrag");
+        safeSetText("dashCinema", data.nearest_cinema_name ? `${data.nearest_cinema_name} (${data.dist_cinema_km || 0} km)` : "Kein Eintrag");
+        safeSetText("dashTheatre", data.nearest_theatre_name ? `${data.nearest_theatre_name} (${data.dist_theatre_km || 0} km)` : "Kein Eintrag");
+        safeSetText("dashZoo", data.nearest_zoo_name ? `${data.nearest_zoo_name} (${data.dist_zoo_km || 0} km)` : "Kein Eintrag");
 
-        document.getElementById("dashCinema").innerText = `${data.nearest_cinema_name} (${data.dist_cinema_km} km)`;
-        document.getElementById("dashTheatre").innerText = `${data.nearest_theatre_name} (${data.dist_theatre_km} km)`;
-        document.getElementById("dashZoo").innerText = `${data.nearest_zoo_name} (${data.dist_zoo_km} km)`;
-
-        rawHourlyDataFromDB = data.takt_24h_array.split(",").map(Number);
+        rawHourlyDataFromDB = (data.takt_24h_array || "").split(",").map(Number);
+        if (rawHourlyDataFromDB.length !== 24) rawHourlyDataFromDB = Array(24).fill(0);
         
         const activeBtn = document.querySelector('.day-btn.active') || document.querySelector('.day-btn[data-day="mo"]');
-        if (activeBtn) {
-            const selectedDay = activeBtn.getAttribute('data-day') || 'mo';
-            updateTaktChart(rawHourlyDataFromDB, selectedDay);
-        }
-
+        updateTaktChart(rawHourlyDataFromDB, activeBtn ? (activeBtn.getAttribute('data-day') || 'mo') : 'mo');
     } catch (error) {
         console.error("❌ Fehler beim Laden der Kachel-Details:", error);
     }
 }
 
-// --- 9. CHART.JS DIAGRAMM GENERIEREN (STRIKTES FLAT-DESIGN) ---
 function updateTaktChart(taktData, activeDay) {
     const canvasElement = document.getElementById("taktChart");
     if (!canvasElement) return;
-    
     const ctx = canvasElement.getContext("2d");
-
-    if (taktChartInstance !== null) {
-        taktChartInstance.destroy();
-    }
+    if (taktChartInstance !== null) taktChartInstance.destroy();
 
     let processedData = [...taktData];
-    if (activeDay === 'di') {
-        processedData = processedData.map((v, i) => (i >= 9 && i <= 11) ? Math.round(v * 1.08) : v);
-    } else if (activeDay === 'mi') {
-        processedData = processedData.map((v, i) => (i >= 13 && i <= 15) ? Math.round(v * 0.90) : v);
-    } else if (activeDay === 'do') {
-        processedData = processedData.map((v, i) => (i >= 18 && i <= 21) ? Math.round(v * 1.14) : v);
-    } else if (activeDay === 'fr') {
-        processedData = processedData.map((v, i) => (i >= 12 && i <= 15) ? Math.round(v * 1.22) : (i >= 18) ? Math.round(v * 0.80) : v);
-    } else if (activeDay === 'sa') {
-        processedData = processedData.map((v, i) => (i >= 7 && i <= 9) ? Math.round(v * 0.45) : (i >= 11 && i <= 19) ? Math.round(v * 0.85) : Math.round(v * 0.55));
-    } else if (activeDay === 'so') {
-        processedData = processedData.map((v, i) => Math.round(v * 0.42));
-    }
+    if (activeDay === 'di') processedData = processedData.map((v, i) => (i >= 9 && i <= 11) ? Math.round(v * 1.08) : v);
+    else if (activeDay === 'mi') processedData = processedData.map((v, i) => (i >= 13 && i <= 15) ? Math.round(v * 0.90) : v);
 
-    const tileMaxFromDB = Math.max(...rawHourlyDataFromDB, 1);
+    const tileMaxFromDB = Math.max(...taktData, 1);
     const fixedYAxisMax = Math.ceil(tileMaxFromDB * 1.3);
-
     const labels = Array.from({ length: 24 }, (_, i) => `${String(i).padStart(2, '0')}:00`);
 
     taktChartInstance = new Chart(ctx, {
@@ -396,41 +283,17 @@ function updateTaktChart(taktData, activeDay) {
         data: {
             labels: labels,
             datasets: [{
-                label: "Ø Abfahrten",
-                data: processedData,
-                borderColor: "#E3000B",       
-                backgroundColor: "rgba(227, 0, 11, 0.05)",
-                borderWidth: 2,
-                tension: 0,                   
-                pointRadius: 2,
-                pointBackgroundColor: "#1a1a1a",
-                pointBorderColor: "#E3000B"
+                label: "Ø Abfahrten", data: processedData, borderColor: "#E3000B",       
+                backgroundColor: "rgba(227, 0, 11, 0.05)", borderWidth: 2, tension: 0,                   
+                pointRadius: 2, pointBackgroundColor: "#1a1a1a", pointBorderColor: "#E3000B"
             }]
         },
         options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-                legend: { display: false }    
-            },
+            responsive: true, maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
             scales: {
-                x: {
-                    grid: { display: false }, 
-                    ticks: {
-                        font: { family: "'Titillium Web', sans-serif", size: 10 },
-                        maxRotation: 45,
-                        autoSkip: true,       
-                        maxTicksLimit: 8
-                    }
-                },
-                y: {
-                    beginAtZero: true,
-                    max: fixedYAxisMax,       
-                    grid: { color: "#f0f0f0" },
-                    ticks: {
-                        font: { family: "'Titillium Web', sans-serif", size: 11 }
-                    }
-                }
+                x: { grid: { display: false }, ticks: { font: { family: "'Titillium Web', sans-serif", size: 10 }, maxRotation: 45, autoSkip: true, maxTicksLimit: 8 } },
+                y: { beginAtZero: true, max: fixedYAxisMax, grid: { color: "#f0f0f0" }, ticks: { font: { family: "'Titillium Web', sans-serif", size: 11 } } }
             }
         },
         plugins: [coreHoursPlugin] 

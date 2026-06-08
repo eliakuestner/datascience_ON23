@@ -11,7 +11,6 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
 
     <link rel="icon" type="image/x-icon" href="favicon.ico">
-
     <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -28,24 +27,24 @@
                 <div class="control-group">
                     <label for="indicatorSelect">Anzeige-Indikator (Karte)</label>
                     <select id="indicatorSelect" class="kpi-select">
-                        <option value="einwohner">Einwohnerzahl (Zensus)</option>
-                        <option value="anzahl_haltestellen">Anzahl Haltestellen</option>
+                        <option value="einwohner">Einwohnerzahl (Zensus 2022)</option>
+                        <option value="anzahl_haltestellen">Anzahl ÖPNV-Haltestellen</option>
                     </select>
                 </div>
 
-                <div class="data-panel active-kachel">
-                    <div class="panel-title">Ausgewählte Rasterzelle</div>
+                <div class="data-panel">
+                    <div class="panel-title">Kachel-Analyse</div>
                     <table class="data-table">
                         <tr>
-                            <td class="label">Kachel-ID</td>
-                            <td id="dashKachelId" class="value">-</td>
+                            <td class="label">Kachel ID</td>
+                            <td id="dashKachelId" class="value" style="font-weight: 700;">-</td>
                         </tr>
                         <tr>
-                            <td class="label">Einwohnerzahl</td>
+                            <td class="label">Einwohner gesamt</td>
                             <td id="dashEinwohner" class="value">-</td>
                         </tr>
                         <tr>
-                            <td class="label">Strukturelle Zone</td>
+                            <td class="label">Dichteklasse</td>
                             <td id="dashZone" class="value">-</td>
                         </tr>
                         <tr>
@@ -53,46 +52,40 @@
                             <td id="dashHaltestellen" class="value">-</td>
                         </tr>
                     </table>
-                    <div class="control-group" style="margin-top: 12px;">
-                        <span class="label" style="font-size: 11px;">Kreuzende Linien</span>
-                        <div id="dashLinien" class="lines-badge">Keine Kachel selektiert</div>
+                    <div style="margin-top: 12px;">
+                        <span class="label" style="font-size: 12px; color: #666666; display: block; margin-bottom: 4px;">Bedienende Linien:</span>
+                        <div id="dashLinien" class="lines-badge">Keine Linien</div>
                     </div>
                 </div>
 
                 <div class="data-panel">
-                    <div class="panel-title">Erreichbarkeit: Daseinsvorsorge</div>
-                    <table class="data-table">
-                        <tr>
-                            <td class="label">Nächstes Krankenhaus</td>
-                            <td id="dashHospital" class="value">-</td>
-                        </tr>
-                        <tr>
-                            <td class="label">Nächstes Rathaus</td>
-                            <td id="dashTownhall" class="value">-</td>
-                        </tr>
-                        <tr>
-                            <td class="label">Nächster Fernbahnhof</td>
-                            <td id="dashBahnhof" class="value">-</td>
-                        </tr>
-                    </table>
-                </div>
-
-                <div class="data-panel">
-                    <div class="panel-title">Erreichbarkeit: Freizeit & Kultur</div>
-                    <table class="data-table">
-                        <tr>
-                            <td class="label">Nächstes Kino</td>
-                            <td id="dashCinema" class="value">-</td>
-                        </tr>
-                        <tr>
-                            <td class="label">Nächstes Theater</td>
-                            <td id="dashTheatre" class="value">-</td>
-                        </tr>
-                        <tr>
-                            <td class="label">Nächster Zoo</td>
-                            <td id="dashZoo" class="value">-</td>
-                        </tr>
-                    </table>
+                    <div class="panel-title">Infrastruktur & POIs</div>
+                    <div class="poi-container">
+                        <div class="poi-row">
+                            <span class="poi-name" id="dashHospitalName" title="Krankenhaus">Krankenhaus</span>
+                            <span class="poi-distance" id="dashHospitalDist">-</span>
+                        </div>
+                        <div class="poi-row">
+                            <span class="poi-name" id="dashTownhallName" title="Rathaus">Rathaus</span>
+                            <span class="poi-distance" id="dashTownhallDist">-</span>
+                        </div>
+                        <div class="poi-row">
+                            <span class="poi-name" id="dashBahnhofName" title="Fernbahnhof">Fernbahnhof</span>
+                            <span class="poi-distance" id="dashBahnhofDist">-</span>
+                        </div>
+                        <div class="poi-row">
+                            <span class="poi-name" id="dashCinemaName" title="Kino">Kino</span>
+                            <span class="poi-distance" id="dashCinemaDist">-</span>
+                        </div>
+                        <div class="poi-row">
+                            <span class="poi-name" id="dashTheatreName" title="Theater">Theater</span>
+                            <span class="poi-distance" id="dashTheatreDist">-</span>
+                        </div>
+                        <div class="poi-row">
+                            <span class="poi-name" id="dashZooName" title="Zoo">Zoo</span>
+                            <span class="poi-distance" id="dashZooDist">-</span>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="data-panel">
@@ -100,8 +93,7 @@
                     <div class="chart-container" style="position: relative; height: 180px;">
                         <canvas id="taktChart"></canvas>
                     </div>
-                    
-                    <div class="weekday-selector" style="display: flex; gap: 2px; margin-top: 12px;">
+                    <div class="day-selector" style="display: flex; gap: 2px; margin-top: 10px; background: #f0f0f0; padding: 2px;">
                         <button class="day-btn active" data-day="mo" style="flex: 1; padding: 6px 2px; border: 1px solid #C7CFE3; background: #E3000B; color: #ffffff; font-family: 'Titillium Web', sans-serif; font-size: 11px; font-weight: 600; cursor: pointer; border-radius: 0; transition: all 0.15s; text-align: center;">MO</button>
                         <button class="day-btn" data-day="di" style="flex: 1; padding: 6px 2px; border: 1px solid #C7CFE3; background: #ffffff; color: #000000; font-family: 'Titillium Web', sans-serif; font-size: 11px; font-weight: 600; cursor: pointer; border-radius: 0; transition: all 0.15s; text-align: center;">DI</button>
                         <button class="day-btn" data-day="mi" style="flex: 1; padding: 6px 2px; border: 1px solid #C7CFE3; background: #ffffff; color: #000000; font-family: 'Titillium Web', sans-serif; font-size: 11px; font-weight: 600; cursor: pointer; border-radius: 0; transition: all 0.15s; text-align: center;">MI</button>
@@ -112,13 +104,12 @@
                     </div>
                 </div>
             </div>
-        </div> 
-        
+        </div>
+
         <div id="map"></div>
     </div>
 
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" 
-            integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="js/app.js"></script>
 </body>
