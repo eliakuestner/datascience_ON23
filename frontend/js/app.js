@@ -87,7 +87,7 @@ function initEventListeners() {
         btn.style.color = '#ffffff';
 
         const selectedDay = btn.getAttribute('data-day') || 'mo';
-        updateTaktChart(rawHourlyDataFromDB, selectedDay);
+updateTaktChart(selectedDay);
     });
 }
 
@@ -326,13 +326,18 @@ function displayPoiMarkersOnMap(data) {
     });
 }
 
+// Globale Variable speichert jetzt das komplette Wochen-Paket der Kachel
+let currentTileTaktData = null;
+
 async function loadKachelDetails(kachelId) {
     try {
         const response = await fetch(`${API_BASE_URL}/kachel/${kachelId}`);
         if (!response.ok) throw new Error("Details konnten nicht geladen werden");
         const data = await response.json();
 
-        // Kachel-Stammdaten & Adresse befüllen
+        // Backup der gesamten Wochentagsdaten im Speicher ablegen
+        currentTileTaktData = data;
+
         safeSetText("dashKachelId", data.kachel_id);
         safeSetText("dashAdresse", data.adresse || "Keine Adresse ermittelbar");
         safeSetText("dashEinwohner", (data.einwohner || 0).toLocaleString("de-DE"));
@@ -340,14 +345,12 @@ async function loadKachelDetails(kachelId) {
         safeSetText("dashHaltestellen", data.anzahl_haltestellen || 0);
         safeSetText("dashLinien", data.linien_liste || "Keine Linien vorhanden");
 
-        // Formatierungsfunktion passend zum Screenshot: "Name (X.XX km)"
         const formatPoi = (name, dist) => {
             if (!name || name === "-" || name === "Kein Eintrag") return "-";
             const distFormatiert = (typeof dist === 'number') ? dist.toLocaleString("de-DE", { minimumFractionDigits: 1, maximumFractionDigits: 2 }) : dist;
             return `${name} (${distFormatiert} km)`;
         };
 
-        // POI-Blöcke befüllen
         safeSetText("dashHospitalDist", formatPoi(data.nearest_hospital_name, data.dist_hospital_km));
         safeSetText("dashTownhallDist", formatPoi(data.nearest_townhall_name, data.dist_townhall_km));
         safeSetText("dashBahnhofDist", formatPoi(data.nearest_bahnhof_name, data.dist_bahnhof_km));
@@ -355,32 +358,43 @@ async function loadKachelDetails(kachelId) {
         safeSetText("dashTheatreDist", formatPoi(data.nearest_theatre_name, data.dist_theatre_km));
         safeSetText("dashZooDist", formatPoi(data.nearest_zoo_name, data.dist_zoo_km));
 
-        // Pins auf der Karte rendern
         displayPoiMarkersOnMap(data);
 
-        // 24h-Taktprofil aktualisieren
-        rawHourlyDataFromDB = (data.takt_24h_array || "").split(",").map(Number);
-        if (rawHourlyDataFromDB.length !== 24) rawHourlyDataFromDB = Array(24).fill(0);
-        
+        // Standardmäßig den aktiven Wochentag oder Montag zeichnen
         const activeBtn = document.querySelector('.day-btn.active') || document.querySelector('.day-btn[data-day="mo"]');
-        updateTaktChart(rawHourlyDataFromDB, activeBtn ? (activeBtn.getAttribute('data-day') || 'mo') : 'mo');
+        const selectedDay = activeBtn ? (activeBtn.getAttribute('data-day') || 'mo') : 'mo';
+        
+        updateTaktChart(selectedDay);
     } catch (error) {
         console.error("❌ Fehler beim Laden der Kachel-Details:", error);
     }
 }
 
-function updateTaktChart(taktData, activeDay) {
+function updateTaktChart(activeDay) {
     const canvasElement = document.getElementById("taktChart");
-    if (!canvasElement) return;
+    if (!canvasElement || !currentTileTaktData) return;
     const ctx = canvasElement.getContext("2d");
     if (taktChartInstance !== null) taktChartInstance.destroy();
 
-    let processedData = [...taktData];
-    if (activeDay === 'di') processedData = processedData.map((v, i) => (i >= 9 && i <= 11) ? Math.round(v * 1.08) : v);
-    else if (activeDay === 'mi') processedData = processedData.map((v, i) => (i >= 13 && i <= 15) ? Math.round(v * 0.90) : v);
+    // 1. STATISCHE SKALIERUNG BERECHNEN:
+    let globalMax = 0;
+    ['mo', 'di', 'mi', 'do', 'fr', 'sa', 'so'].forEach(tag => {
+        const rawString = currentTileTaktData[`takt_24h_${tag}`] || currentTileTaktData[`takt_24h_array`] || "";
+        const arr = rawString.split(",").map(Number);
+        if (arr.length === 24) {
+            globalMax = Math.max(globalMax, ...arr);
+        }
+    });
 
-    const tileMaxFromDB = Math.max(...taktData, 1);
-    const fixedYAxisMax = Math.ceil(tileMaxFromDB * 1.3);
+    // Sicherheitsnetz gegen Nachkommastellen auf der Y-Achse
+    const fixedYAxisMax = globalMax > 2 ? Math.ceil(globalMax * 1.2) : 10;
+
+    // 2. EMPIRISCHES ARRAY FÜR DEN GEWÄHLTEN WOCHENTAG LADEN:
+    const dbSpaltenName = `takt_24h_${activeDay}`;
+    const valString = currentTileTaktData[dbSpaltenName] || currentTileTaktData[`takt_24h_array`] || "";
+    let processedData = valString.split(",").map(Number);
+    if (processedData.length !== 24) processedData = Array(24).fill(0);
+
     const labels = Array.from({ length: 24 }, (_, i) => `${String(i).padStart(2, '0')}:00`);
 
     taktChartInstance = new Chart(ctx, {
@@ -388,17 +402,32 @@ function updateTaktChart(taktData, activeDay) {
         data: {
             labels: labels,
             datasets: [{
-                label: "Ø Abfahrten", data: processedData, borderColor: "#E3000B",       
-                backgroundColor: "rgba(227, 0, 11, 0.05)", borderWidth: 2, tension: 0,                   
-                pointRadius: 2, pointBackgroundColor: "#1a1a1a", pointBorderColor: "#E3000B"
+                label: "Ø Abfahrten", 
+                data: processedData, 
+                borderColor: "#E3000B",       
+                backgroundColor: "rgba(227, 0, 11, 0.05)", 
+                borderWidth: 2, 
+                tension: 0,                   
+                pointRadius: 2, 
+                pointBackgroundColor: "#1a1a1a", 
+                pointBorderColor: "#E3000B"
             }]
         },
         options: {
-            responsive: true, maintainAspectRatio: false,
+            responsive: true, 
+            maintainAspectRatio: false,
             plugins: { legend: { display: false } },
             scales: {
-                x: { grid: { display: false }, ticks: { font: { family: "'Titillium Web', sans-serif", size: 10 }, maxRotation: 45, autoSkip: true, maxTicksLimit: 8 } },
-                y: { beginAtZero: true, max: fixedYAxisMax, grid: { color: "#f0f0f0" }, ticks: { font: { family: "'Titillium Web', sans-serif", size: 11 } } }
+                x: { 
+                    grid: { display: false }, 
+                    ticks: { font: { family: "'Titillium Web', sans-serif", size: 10 }, maxRotation: 45, autoSkip: true, maxTicksLimit: 8 } 
+                },
+                y: { 
+                    beginAtZero: true, 
+                    max: fixedYAxisMax,
+                    grid: { color: "#f0f0f0" }, 
+                    ticks: { font: { family: "'Titillium Web', sans-serif", size: 11 } } 
+                }
             }
         },
         plugins: [coreHoursPlugin] 

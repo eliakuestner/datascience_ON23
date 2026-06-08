@@ -48,8 +48,7 @@ app.add_middleware(
 # Das exakte Spaltenverzeichnis eurer Tabelle in backend/main.py
 # Das exakte Spaltenverzeichnis eurer Tabelle in backend/main.py
 DETAIL_COLUMNS = [
-    "kachel_id", "x_min", "y_min", "einwohner", "bevoelkerungs_klasse",
-    "adresse",  # <--- GENAU HIER HINZUFÜGEN!
+    "kachel_id", "x_min", "y_min", "einwohner", "bevoelkerungs_klasse", "adresse",
     "p1_lat", "p1_lon", "p2_lat", "p2_lon", "p3_lat", "p3_lon", "p4_lat", "p4_lon",
     "dist_hospital_km", "nearest_hospital_name",
     "dist_townhall_km", "nearest_townhall_name",
@@ -58,7 +57,9 @@ DETAIL_COLUMNS = [
     "dist_theatre_km", "nearest_theatre_name",
     "dist_zoo_km", "nearest_zoo_name",
     "anzahl_haltestellen", "linien_liste",
-    "takt_pendler_morgens", "takt_wochenende", "takt_24h_array", "oepnv_score"
+    "takt_pendler_morgens", "takt_wochenende", "oepnv_score",
+    # DIE NEUEN WOCHENTAGS-ARRAYS:
+    "takt_24h_mo", "takt_24h_di", "takt_24h_mi", "takt_24h_do", "takt_24h_fr", "takt_24h_sa", "takt_24h_so"
 ]
 
 
