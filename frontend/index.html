@@ -28,10 +28,7 @@
                 <div class="control-group">
                     <label for="indicatorSelect">Anzeige-Indikator (Karte)</label>
                     <select id="indicatorSelect" class="kpi-select">
-                        <option value="oepnv_score">ÖPNV-Versorgungsscore</option>
                         <option value="einwohner">Einwohnerzahl (Zensus)</option>
-                        <option value="takt_pendler_morgens">Ø Takt Pendlerzeit (Mo-Fr)</option>
-                        <option value="takt_wochenende">Ø Takt Freizeit (Sa-So)</option>
                         <option value="anzahl_haltestellen">Anzahl Haltestellen</option>
                     </select>
                 </div>
@@ -100,13 +97,24 @@
 
                 <div class="data-panel">
                     <div class="panel-title">24h-Fahrplanprofil (Wochentag)</div>
-                    <div class="chart-container">
-                        <canvas id="taktChart" height="180"></canvas>
+                    <div class="chart-container" style="position: relative; height: 180px;">
+                        <canvas id="taktChart"></canvas>
+                    </div>
+                    
+                    <div class="weekday-selector" style="display: flex; gap: 2px; margin-top: 12px;">
+                        <button class="day-btn active" data-day="mo" style="flex: 1; padding: 6px 2px; border: 1px solid #C7CFE3; background: #E3000B; color: #ffffff; font-family: 'Titillium Web', sans-serif; font-size: 11px; font-weight: 600; cursor: pointer; border-radius: 0; transition: all 0.15s; text-align: center;">MO</button>
+                        <button class="day-btn" data-day="di" style="flex: 1; padding: 6px 2px; border: 1px solid #C7CFE3; background: #ffffff; color: #000000; font-family: 'Titillium Web', sans-serif; font-size: 11px; font-weight: 600; cursor: pointer; border-radius: 0; transition: all 0.15s; text-align: center;">DI</button>
+                        <button class="day-btn" data-day="mi" style="flex: 1; padding: 6px 2px; border: 1px solid #C7CFE3; background: #ffffff; color: #000000; font-family: 'Titillium Web', sans-serif; font-size: 11px; font-weight: 600; cursor: pointer; border-radius: 0; transition: all 0.15s; text-align: center;">MI</button>
+                        <button class="day-btn" data-day="do" style="flex: 1; padding: 6px 2px; border: 1px solid #C7CFE3; background: #ffffff; color: #000000; font-family: 'Titillium Web', sans-serif; font-size: 11px; font-weight: 600; cursor: pointer; border-radius: 0; transition: all 0.15s; text-align: center;">DO</button>
+                        <button class="day-btn" data-day="fr" style="flex: 1; padding: 6px 2px; border: 1px solid #C7CFE3; background: #ffffff; color: #000000; font-family: 'Titillium Web', sans-serif; font-size: 11px; font-weight: 600; cursor: pointer; border-radius: 0; transition: all 0.15s; text-align: center;">FR</button>
+                        <button class="day-btn" data-day="sa" style="flex: 1; padding: 6px 2px; border: 1px solid #C7CFE3; background: #ffffff; color: #000000; font-family: 'Titillium Web', sans-serif; font-size: 11px; font-weight: 600; cursor: pointer; border-radius: 0; transition: all 0.15s; text-align: center;">SA</button>
+                        <button class="day-btn" data-day="so" style="flex: 1; padding: 6px 2px; border: 1px solid #C7CFE3; background: #ffffff; color: #000000; font-family: 'Titillium Web', sans-serif; font-size: 11px; font-weight: 600; cursor: pointer; border-radius: 0; transition: all 0.15s; text-align: center;">SO</button>
                     </div>
                 </div>
             </div>
-        </div> <div id="map"></div>
-
+        </div> 
+        
+        <div id="map"></div>
     </div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" 
