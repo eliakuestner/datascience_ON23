@@ -5,7 +5,7 @@ from shapely.geometry import Polygon, Point
 from sqlalchemy import create_engine
 from dotenv import load_dotenv
 
-# 1. .env laden
+# .env Konfiguration laden
 base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 load_dotenv(os.path.join(base_dir, '.env'))
 
@@ -13,85 +13,119 @@ def get_db_engine():
     db_url = f"postgresql://{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD')}@{os.getenv('DB_HOST')}:{os.getenv('DB_PORT')}/{os.getenv('DB_NAME')}"
     return create_engine(db_url)
 
+def time_to_minutes(t_str):
+    """Konvertiert GTFS HH:MM:SS sicher in Minuten seit Mitternacht."""
+    if pd.isna(t_str) or not t_str: 
+        return None
+    try:
+        parts = str(t_str).strip().split(':')
+        return int(parts[0]) * 60 + int(parts[1])
+    except:
+        return None
+
 def run_etl_pipeline():
     engine = get_db_engine()
-    print("🚀 Starte Data Science ETL-Pipeline für Karlsruhe...")
+    print("🚀 Starte finale raum-begrenzte High-Performance ETL-Pipeline...")
 
-# --- SCHRITT A: ZENSUS-DATEN LADEN & 3x3KM GRID MATHEMATISCH BINDEN ---
-    print("📦 Lade Zensus-Daten...")
-    df_zensus = pd.read_sql("SELECT x_mp_1km, y_mp_1km, \"Einwohner\" as einwohner FROM zensus2022_bevoelkerungszahl", engine)
+    # --- SCHRITT A: ERMITTLUNG DER KARLSRUHE BOUNDING BOX AUS POIS ---
+    print("📍 Analysiere geografische Ausdehnung der Region Karlsruhe...")
+    df_pois_raw = pd.read_sql("SELECT \"X\" as x, \"Y\" as y FROM karlsruhe_pois_datensatz LIMIT 10", engine)
+    sample_x = df_pois_raw['x'].iloc[0]
     
-    # Mathematischer Grid-Trick: Wir runden die 1km-Zentren auf die nächste 3000m-Kante ab
+    if sample_x < 180:
+        poi_src_crs = "EPSG:4326"
+    elif 4000000 < sample_x < 5000000:
+        poi_src_crs = "EPSG:3035"
+    elif 3000000 < sample_x < 4000000:
+        poi_src_crs = "EPSG:31467"
+    else:
+        poi_src_crs = "EPSG:25832"
+
+    df_pois_bounds = pd.read_sql("SELECT MIN(\"X\") as min_x, MAX(\"X\") as max_x, MIN(\"Y\") as min_y, MAX(\"Y\") as max_y FROM karlsruhe_pois_datensatz", engine)
+    
+    # In das metrische Zensus-System (EPSG:3035) transformieren um Grenzen festzulegen
+    bounds_gdf = gpd.GeoDataFrame(
+        geometry=[
+            Point(df_pois_bounds['min_x'].iloc[0], df_pois_bounds['min_y'].iloc[0]),
+            Point(df_pois_bounds['max_x'].iloc[0], df_pois_bounds['max_y'].iloc[0])
+        ], 
+        crs=poi_src_crs
+    ).to_crs("EPSG:3035")
+    
+    # Bounding Box mit 20km Puffer erweitern, um das Karlsruher Umland komplett abzufangen
+    x_min_bounds = bounds_gdf.geometry.iloc[0].x - 20000
+    y_min_bounds = bounds_gdf.geometry.iloc[0].y - 20000
+    x_max_bounds = bounds_gdf.geometry.iloc[1].x + 20000
+    y_max_bounds = bounds_gdf.geometry.iloc[1].y + 20000
+
+    # --- SCHRITT B: FILTERUNG DER ZENSUS-DATEN DIREKT IN DER DB ---
+    print("📦 Lade Zensus-Daten (Exklusiv gefiltert auf Region Karlsruhe)...")
+    df_zensus = pd.read_sql(f"""
+        SELECT x_mp_1km, y_mp_1km, "Einwohner" as einwohner 
+        FROM zensus2022_bevoelkerungszahl
+        WHERE x_mp_1km BETWEEN {x_min_bounds} AND {x_max_bounds}
+          AND y_mp_1km BETWEEN {y_min_bounds} AND {y_max_bounds}
+    """, engine)
+    
+    # Grid-Berechnung (Abrundung auf 3000 Meter Kantenlänge)
     df_zensus['x_3k'] = (df_zensus['x_mp_1km'] // 3000) * 3000
     df_zensus['y_3k'] = (df_zensus['y_mp_1km'] // 3000) * 3000
-
-    # Aggregieren: Einwohner pro 3x3km Kachel aufsummieren
     df_grid_base = df_zensus.groupby(['x_3k', 'y_3k']).agg({'einwohner': 'sum'}).reset_index()
-    
-    # Performance-Boost: Kacheln mit 0 Einwohnern vorab filtern
-    df_grid_base = df_grid_base[df_grid_base['einwohner'] > 0].reset_index(drop=True)
     df_grid_base['kachel_id'] = df_grid_base.index + 1
-    print(f"📊 Relevante bewohnte Kacheln nach Vorfilterung: {len(df_grid_base)}")
+    print(f"📊 Kacheln im erweiterten Raum Karlsruhe: {len(df_grid_base)}")
 
-    # --- SCHRITT B: GEOMETRIEN & LEAFLET-GPS BOUNDS BERECHNEN ---
-    print("🌍 Berechne räumliche Polygone und GPS-Ecken für Leaflet...")
-    polygons = []
-    lat_mins, lon_mins, lat_maxs, lon_maxs = [], [], [], []
-
-    for _, row in df_grid_base.iterrows():
-        x, y = row['x_3k'], row['y_3k']
-        # EPSG:3035 Box erzeugen
-        poly = Polygon([(x, y), (x + 3000, y), (x + 3000, y + 3000), (x, y + 3000)])
-        polygons.append(poly)
-        
-        # Umrechnung in GPS-Koordinaten (WGS84) für Leaflet Bounds
-        box_gdf = gpd.GeoDataFrame(geometry=[Point(x, y), Point(x + 3000, y + 3000)], crs="EPSG:3035").to_crs("EPSG:4326")
-        lon_mins.append(box_gdf.geometry.iloc[0].x)
-        lat_mins.append(box_gdf.geometry.iloc[0].y)
-        lon_maxs.append(box_gdf.geometry.iloc[1].x)
-        lat_maxs.append(box_gdf.geometry.iloc[1].y)
-
+    # --- SCHRITT C: GEOMETRIEN & GPS BOUNDS FÜR LEAFLET ---
+    print("🌍 Berechne räumliche Kacheln und GPS-Ecken...")
+    points_min = [Point(r['x_3k'], r['y_3k']) for _, r in df_grid_base.iterrows()]
+    points_max = [Point(r['x_3k'] + 3000, r['y_3k'] + 3000) for _, r in df_grid_base.iterrows()]
+    
+    gdf_min = gpd.GeoDataFrame(geometry=points_min, crs="EPSG:3035").to_crs("EPSG:4326")
+    gdf_max = gpd.GeoDataFrame(geometry=points_max, crs="EPSG:3035").to_crs("EPSG:4326")
+    
+    df_grid_base['lon_min'] = gdf_min.geometry.x
+    df_grid_base['lat_min'] = gdf_min.geometry.y
+    df_grid_base['lon_max'] = gdf_max.geometry.x
+    df_grid_base['lat_max'] = gdf_max.geometry.y
+    
+    polygons = [Polygon([(r['x_3k'], r['y_3k']), (r['x_3k'] + 3000, r['y_3k']), (r['x_3k'] + 3000, r['y_3k'] + 3000), (r['x_3k'], r['y_3k'] + 3000)]) for _, r in df_grid_base.iterrows()]
     gdf_grid = gpd.GeoDataFrame(df_grid_base, geometry=polygons, crs="EPSG:3035")
-    gdf_grid['lat_min'], gdf_grid['lon_min'] = lat_mins, lon_mins
-    gdf_grid['lat_max'], gdf_grid['lon_max'] = lat_maxs, lon_maxs
 
-    # Bevölkerungsklasse zuweisen
-    q25 = gdf_grid['einwohner'].quantile(0.25)
-    q75 = gdf_grid['einwohner'].quantile(0.75)
-    gdf_grid['bevoelkerungs_klasse'] = gdf_grid['einwohner'].apply(
-        lambda e: "Hoch" if e > q75 else ("Gering" if e < q25 else "Mittel")
-    )
+    # Eure exakte Definition der Einwohnerdichte-Klassen pro 9km² Kachel
+    def classify_zone(e):
+        if e == 0: return "Unbesiedelte Zone"
+        elif e <= 4500: return "Ländliche Zone"
+        elif e <= 13500: return "Aussenstädtische Zone"
+        elif e <= 36000: return "Urbane Kernzone"
+        else: return "Metropolitane Kernzone"
+    gdf_grid['bevoelkerungs_klasse'] = gdf_grid['einwohner'].apply(classify_zone)
 
-    # --- SCHRITT C: HYPOTHESE 1 - POI DISTANZEN & NAMEN ERMITTELN ---
-    print("🏥 Analysiere POIs (Krankenhäuser, Rathäuser, Bahnhöfe)...")
+    # --- SCHRITT D: POI-DISTANZEN (KINO, THEATER, ZOO) ---
+    print("🏥 Analysiere POI-Distanzen (Infrastruktur & Kultur)...")
     df_pois = pd.read_sql("SELECT name, poi_type, \"X\" as x, \"Y\" as y FROM karlsruhe_pois_datensatz", engine)
-    gdf_pois = gpd.GeoDataFrame(df_pois, geometry=gpd.points_from_xy(df_pois.x, df_pois.y), crs="EPSG:4326").to_crs("EPSG:3035")
+    gdf_pois = gpd.GeoDataFrame(df_pois, geometry=gpd.points_from_xy(df_pois.x, df_pois.y), crs=poi_src_crs).to_crs("EPSG:3035")
 
-    centroids = gdf_grid.geometry.centroid
+    gdf_centroids = gpd.GeoDataFrame(gdf_grid[['kachel_id']], geometry=gdf_grid.geometry.centroid, crs="EPSG:3035")
+    poi_targets = [
+        ('hospital', 'hospital'), ('townhall', 'townhall'), ('station', 'bahnhof'),
+        ('cinema', 'cinema'), ('theatre', 'theatre'), ('zoo', 'zoo')
+    ]
     
-    for p_type, prefix in [('hospital', 'hospital'), ('townhall', 'townhall'), ('station', 'bahnhof')]:
-        sub_pois = gdf_pois[gdf_pois['poi_type'] == p_type]
-        dists, names = [], []
-        
-        for centroid in centroids:
-            if not sub_pois.empty:
-                all_dists = sub_pois.distance(centroid)
-                min_idx = all_dists.idxmin()
-                dists.append(all_dists[min_idx] / 1000.0) # In Kilometer
-                names.append(sub_pois.loc[min_idx, 'name'] if pd.notna(sub_pois.loc[min_idx, 'name']) else f"Unbekanntes {p_type}")
-            else:
-                dists.append(None)
-                names.append("Kein Eintrag")
-                
-        gdf_grid[f'dist_{prefix}_km'] = dists
-        gdf_grid[f'nearest_{prefix}_name'] = names
+    for p_type, prefix in poi_targets:
+        sub_pois = gdf_pois[gdf_pois['poi_type'] == p_type].copy()
+        if not sub_pois.empty:
+            joined = gpd.sjoin_nearest(gdf_centroids, sub_pois, how='left', distance_col='dist_m')
+            joined = joined.drop_duplicates(subset=['kachel_id'], keep='first')
+            joined[f'dist_{prefix}_km'] = round(joined['dist_m'] / 1000.0, 2)
+            joined = joined.rename(columns={'name': f'nearest_{prefix}_name'})
+            gdf_grid = gdf_grid.merge(joined[['kachel_id', f'dist_{prefix}_km', f'nearest_{prefix}_name']], on='kachel_id', how='left')
+        else:
+            gdf_grid[f'dist_{prefix}_km'] = None
+            gdf_grid[f'nearest_{prefix}_name'] = "Kein Eintrag"
 
-    # --- SCHRITT D: GTFS-DATEN AGGREGRIEREN (HYPOTHESE 2 & 3) ---
-    print("🚌 Verarbeite GTFS-Fahrplandaten (Taktung & Linien)...")
-    df_stops = pd.read_sql("SELECT stop_id, stop_name, stop_lat, stop_lon FROM stops", engine)
+    # --- SCHRITT E: GTFS-AGREGGATION MIT STRING-CAST-SCHUTZ ---
+    print("🚌 Verarbeite GTFS-Komponenten aus der Datenbank...")
+    df_stops = pd.read_sql("SELECT stop_id, stop_lat, stop_lon FROM stops", engine)
     gdf_stops = gpd.GeoDataFrame(df_stops, geometry=gpd.points_from_xy(df_stops.stop_lon, df_stops.stop_lat), crs="EPSG:4326").to_crs("EPSG:3035")
-    
-    # Haltestellen mathematisch den Kacheln zuordnen
     gdf_stops['x_3k'] = (gdf_stops.geometry.x // 3000) * 3000
     gdf_stops['y_3k'] = (gdf_stops.geometry.y // 3000) * 3000
 
@@ -100,80 +134,80 @@ def run_etl_pipeline():
     df_st = pd.read_sql("SELECT trip_id, stop_id, arrival_time FROM stop_times", engine)
     df_cal = pd.read_sql("SELECT service_id, monday, tuesday, wednesday, thursday, friday, saturday, sunday FROM calendar", engine)
 
+    # Typbereinigung für fehlerfreie Verknüpfungen
+    for df in [df_st, gdf_stops]: df['stop_id'] = df['stop_id'].astype(str).str.strip()
+    for df in [df_st, df_trips]: df['trip_id'] = df['trip_id'].astype(str).str.strip()
+    for df in [df_trips, df_routes]: df['route_id'] = df['route_id'].astype(str).str.strip()
+    for df in [df_trips, df_cal]: df['service_id'] = df['service_id'].astype(str).str.strip()
+
     df_fahrten = df_st.merge(gdf_stops[['stop_id', 'x_3k', 'y_3k']], on='stop_id')
     df_fahrten = df_fahrten.merge(df_trips, on='trip_id')
     df_fahrten = df_fahrten.merge(df_routes, on='route_id')
     df_fahrten = df_fahrten.merge(df_cal, on='service_id')
 
-    df_fahrten['stunde'] = df_fahrten['arrival_time'].apply(lambda x: int(x.split(':')[0]) if pd.notna(x) else 0)
-    df_fahrten['stunde'] = df_fahrten['stunde'].apply(lambda h: h % 24)
+    df_stops_count = gdf_stops.groupby(['x_3k', 'y_3k']).size().reset_index(name='anzahl_haltestellen')
 
-    kachel_haltestellen_anzahl = []
-    kachel_linien = []
-    kachel_takt_morgens = []
-    kachel_takt_we = []
-    kachel_arrays = []
+    if not df_fahrten.empty:
+        df_fahrten['total_minutes'] = df_fahrten['arrival_time'].apply(time_to_minutes)
+        df_fahrten['stunde'] = df_fahrten['total_minutes'].apply(lambda m: int((m // 60) % 24) if m is not None else 0)
 
-    for _, row in gdf_grid.iterrows():
-        x, y = row['x_3k'], row['y_3k']
+        df_lines = df_fahrten.groupby(['x_3k', 'y_3k'])['route_short_name'].apply(
+            lambda x: ", ".join(sorted(x.dropna().unique().astype(str)))
+        ).reset_index(name='linien_liste')
+
+        # Taktungen berechnen (Pendlerzeitfenster: Mo-Fr, 6:30-8:30 & 16:00-18:30 = 4.5h)
+        m_start, m_end = 6*60 + 30, 8*60 + 30
+        a_start, a_end = 16*60, 18*60 + 30
         
-        stops_in_kachel = gdf_stops[(gdf_stops['x_3k'] == x) & (gdf_stops['y_3k'] == y)]
-        kachel_haltestellen_anzahl.append(len(stops_in_kachel))
-        
-        fahrten_in_kachel = df_fahrten[(df_fahrten['x_3k'] == x) & (df_fahrten['y_3k'] == y)]
-        
-        if not fahrten_in_kachel.empty:
-            linien = sorted(fahrten_in_kachel['route_short_name'].unique().tolist())
-            kachel_linien.append(", ".join(linien))
-            
-            # Hypothese 2: Pendler morgens (Di-Do, 6-9 Uhr) -> 3 Std
-            pendler_fahrten = fahrten_in_kachel[
-                (fahrten_in_kachel['tuesday'] == 1) & 
-                (fahrten_in_kachel['stunde'].isin([6, 7, 8]))
-            ]
-            kachel_takt_morgens.append(round(len(pendler_fahrten) / 3.0, 2))
-            
-            # Hypothese 3: Wochenende (Sa-So, 24h-Schnitt) -> 48 Std
-            we_fahrten = fahrten_in_kachel[
-                (fahrten_in_kachel['saturday'] == 1) | (fahrten_in_kachel['sunday'] == 1)
-            ]
-            kachel_takt_we.append(round(len(we_fahrten) / 48.0, 2))
-            
-            # 24h-Array für Chart.js (Durchschnitt Montag)
-            wochentag_fahrten = fahrten_in_kachel[fahrten_in_kachel['monday'] == 1]
-            hours_count = wochentag_fahrten.groupby('stunde').size().reindex(range(24), fill_value=0).tolist()
-            kachel_arrays.append(",".join(map(str, hours_count)))
-        else:
-            kachel_linien.append("Keine Linien")
-            kachel_takt_morgens.append(0.0)
-            kachel_takt_we.append(0.0)
-            kachel_arrays.append(",".join(["0"]*24))
+        df_pendler = df_fahrten[
+            ((df_fahrten['monday'] == 1) | (df_fahrten['tuesday'] == 1) | (df_fahrten['wednesday'] == 1) | (df_fahrten['thursday'] == 1) | (df_fahrten['friday'] == 1)) & 
+            (((df_fahrten['total_minutes'] >= m_start) & (df_fahrten['total_minutes'] <= m_end)) |
+             ((df_fahrten['total_minutes'] >= a_start) & (df_fahrten['total_minutes'] <= a_end)))
+        ]
+        df_pendler_takt = df_pendler.groupby(['x_3k', 'y_3k']).size().reset_index(name='p_count')
+        df_pendler_takt['takt_pendler_morgens'] = round(df_pendler_takt['p_count'] / (5.0 * 4.5), 2)
 
-    gdf_grid['anzahl_haltestellen'] = kachel_haltestellen_anzahl
-    gdf_grid['linien_liste'] = kachel_linien
-    gdf_grid['takt_pendler_morgens'] = kachel_takt_morgens
-    gdf_grid['takt_wochenende'] = kachel_takt_we
-    gdf_grid['takt_24h_array'] = kachel_arrays
+        df_we = fahrten = df_fahrten[(df_fahrten['saturday'] == 1) | (df_fahrten['sunday'] == 1)]
+        df_we_takt = df_we.groupby(['x_3k', 'y_3k']).size().reset_index(name='we_count')
+        df_we_takt['takt_wochenende'] = round(df_we_takt['we_count'] / 48.0, 2)
 
-    # --- SCHRITT E: DATA-SCIENCE ÖPNV-SCORE BERECHNEN ---
+        df_wt_profile = df_fahrten[(df_fahrten['monday'] == 1) | (df_fahrten['tuesday'] == 1) | (df_fahrten['wednesday'] == 1) | (df_fahrten['thursday'] == 1) | (df_fahrten['friday'] == 1)]
+        df_hourly = df_wt_profile.groupby(['x_3k', 'y_3k', 'stunde']).size().unstack(fill_value=0)
+        df_hourly = df_hourly.reindex(columns=range(24), fill_value=0)
+        df_hourly_avg = (df_hourly / 5.0).round(1)
+        df_hourly_str = df_hourly_avg.apply(lambda row: ",".join(row.astype(str)), axis=1).reset_index(name='takt_24h_array')
+
+        # Mergen an das räumlich begrenzte Hauptgrid
+        gdf_grid = gdf_grid.merge(df_stops_count, on=['x_3k', 'y_3k'], how='left')
+        gdf_grid = gdf_grid.merge(df_lines, on=['x_3k', 'y_3k'], how='left')
+        gdf_grid = gdf_grid.merge(df_pendler_takt[['x_3k', 'y_3k', 'takt_pendler_morgens']], on=['x_3k', 'y_3k'], how='left')
+        gdf_grid = gdf_grid.merge(df_we_takt[['x_3k', 'y_3k', 'takt_wochenende']], on=['x_3k', 'y_3k'], how='left')
+        gdf_grid = gdf_grid.merge(df_hourly_str, on=['x_3k', 'y_3k'], how='left')
+
+    # Spalten absichern
+    gdf_grid['anzahl_haltestellen'] = gdf_grid['anzahl_haltestellen'].fillna(0).astype(int)
+    gdf_grid['linien_liste'] = gdf_grid['linien_liste'].fillna("Keine Linien")
+    gdf_grid['takt_pendler_morgens'] = gdf_grid['takt_pendler_morgens'].fillna(0.0)
+    gdf_grid['takt_wochenende'] = gdf_grid['takt_wochenende'].fillna(0.0)
+    gdf_grid['takt_24h_array'] = gdf_grid['takt_24h_array'].fillna(",".join(["0.0"]*24))
+
     max_einwohner = gdf_grid['einwohner'].max() if gdf_grid['einwohner'].max() > 0 else 1
     max_takt = gdf_grid['takt_pendler_morgens'].max() if gdf_grid['takt_pendler_morgens'].max() > 0 else 1
-    
-    gdf_grid['oepnv_score'] = gdf_grid.apply(
-        lambda r: round(((r['einwohner'] / max_einwohner) * 40) + ((r['takt_pendler_morgens'] / max_takt) * 60), 1),
-        axis=1
-    )
+    gdf_grid['oepnv_score'] = gdf_grid.apply(lambda r: round(((r['einwohner'] / max_einwohner) * 40) + ((r['takt_pendler_morgens'] / max_takt) * 60), 1), axis=1)
+
+    # Relevanzfilter für das Frontend
+    gdf_grid = gdf_grid[(gdf_grid['einwohner'] > 0) | (gdf_grid['anzahl_haltestellen'] > 0)].reset_index(drop=True)
+    print(f"📉 Finale Kachelanzahl exklusiv für Karlsruhe: {len(gdf_grid)}")
 
     # --- SCHRITT F: IN DIE DATENBANK SCHREIBEN ---
-    print("💾 Schreibe berechnete Kennzahlen in Tabelle 'kachel_analytics'...")
-    df_final = pd.DataFrame(gdf_grid.drop(columns='geometry'))
+    print("💾 Befülle Tabelle 'kachel_analytics'...")
+    df_final = pd.DataFrame(gdf_grid.drop(columns='geometry')).rename(columns={'x_3k': 'x_min', 'y_3k': 'y_min'})
     
-    # Spaltennamen exakt an SQL-Struktur anpassen (aus x_3k wird x_min etc.)
-    df_final = df_final.rename(columns={'x_3k': 'x_min', 'y_3k': 'y_min'})
-    
-    # Daten hochladen
+    with engine.begin() as conn:
+        conn.exec_driver_sql("TRUNCATE TABLE kachel_analytics;")
+        
     df_final.to_sql("kachel_analytics", engine, if_exists="append", index=False)
-    print("🎉 ETL-Pipeline erfolgreich beendet! Eure vorberechnete Tabelle ist voll.")
+    print("🎉 ETL-Pipeline erfolgreich beendet! Das Karlsruher Datenpaket steht perfekt.")
 
 if __name__ == "__main__":
     run_etl_pipeline()

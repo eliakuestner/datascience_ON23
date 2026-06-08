@@ -1,0 +1,183 @@
+  
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Titillium Web', sans-serif;
+            /* Absolute Kanten-Garantie im gesamten UI-System */
+            border-radius: 0px !important;
+        }
+
+        html, body {
+            height: 100%;
+            overflow: hidden;
+            background-color: #f5f5f5;
+            color: #1a1a1a;
+        }
+
+        /* Split-Screen Layout-Skelett */
+        .app-container {
+            display: flex;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        /* Linker Bereich: Vollflächige Leaflet-Karte */
+        #map {
+            flex: 1;
+            height: 100%;
+            background-color: #e5e5e5;
+        }
+
+        /* Rechter Bereich: Feste, scrollbare Dashboard-Sidebar */
+        .sidebar {
+            width: 450px;
+            height: 100%;
+            background-color: #ffffff;
+            border-left: 2px solid #C7CFE3;
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+            box-shadow: -2px 0 15px rgba(0,0,0,0.05);
+        }
+
+        /* Dashboard Header */
+        .sidebar-header {
+            background-color: #1a1a1a;
+            color: #ffffff;
+            padding: 24px;
+            border-bottom: 4px solid #E3000B;
+        }
+
+        .sidebar-header h1 {
+            font-size: 22px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .sidebar-header p {
+            font-size: 13px;
+            color: #C7CFE3;
+            margin-top: 4px;
+            font-weight: 300;
+        }
+
+        /* Dashboard Content-Blöcke */
+        .sidebar-content {
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+        }
+
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .control-group label {
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+            color: #1a1a1a;
+            letter-spacing: 0.5px;
+        }
+
+        /* Minimalistisches Dropdown-Design */
+        .kpi-select {
+            width: 100%;
+            padding: 12px;
+            font-size: 15px;
+            background-color: #ffffff;
+            border: 2px solid #C7CFE3;
+            color: #1a1a1a;
+            font-weight: 600;
+            cursor: pointer;
+            outline: none;
+            transition: border-color 0.2s ease;
+        }
+
+        .kpi-select:focus {
+            border-color: #E3000B;
+        }
+
+        /* Daten-Karten (Dashboard Panels) */
+        .data-panel {
+            border: 2px solid #C7CFE3;
+            padding: 16px;
+            background-color: #ffffff;
+        }
+
+        .data-panel.active-kachel {
+            border-left: 4px solid #E3000B;
+        }
+
+        .panel-title {
+            font-size: 13px;
+            font-weight: 700;
+            text-transform: uppercase;
+            color: #E3000B;
+            margin-bottom: 12px;
+            letter-spacing: 0.5px;
+            border-bottom: 1px solid #C7CFE3;
+            padding-bottom: 4px;
+        }
+
+        /* Tabellarische Daten-Aufbereitung */
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .data-table tr {
+            border-bottom: 1px solid #f0f0f0;
+        }
+
+        .data-table tr:last-child {
+            border-bottom: none;
+        }
+
+        .data-table td {
+            padding: 8px 0;
+            font-size: 14px;
+        }
+
+        .data-table td.label {
+            color: #666666;
+            font-weight: 300;
+        }
+
+        .data-table td.value {
+            text-align: right;
+            font-weight: 600;
+            color: #1a1a1a;
+        }
+
+        /* Highlight-Stil für Linienlisten */
+        .lines-badge {
+            display: inline-block;
+            background-color: #f0f0f0;
+            color: #1a1a1a;
+            padding: 4px 8px;
+            font-size: 12px;
+            font-weight: 600;
+            margin-top: 4px;
+            border: 1px solid #C7CFE3;
+        }
+
+        /* Container für das Liniendiagramm */
+        .chart-container {
+            width: 100%;
+            margin-top: 8px;
+        }
+
+        /* Custom Leaflet Tooltip Styling passend zum CD */
+        .leaflet-tooltip {
+            background-color: #1a1a1a !important;
+            color: #ffffff !important;
+            border: 1px solid #E3000B !important;
+            font-weight: 600 !important;
+            box-shadow: none !important;
+        }

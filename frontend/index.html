@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ÖPNV-Analytics Karlsruhe</title>
+    
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Titillium+Web:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+
+    <link rel="icon" type="image/x-icon" href="favicon.ico">
+
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+    <div class="app-container">
+        <div id="map"></div>
+
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <h1>ÖPNV-Analytics</h1>
+                <p>Raum-zeitliche Versorgungsqualität · Region Karlsruhe</p>
+            </div>
+
+            <div class="sidebar-content">
+                <div class="control-group">
+                    <label for="indicatorSelect">Anzeige-Indikator (Karte)</label>
+                    <select id="indicatorSelect" class="kpi-select">
+                        <option value="oepnv_score">ÖPNV-Versorgungsscore</option>
+                        <option value="einwohner">Einwohnerzahl (Zensus)</option>
+                        <option value="takt_pendler_morgens">Ø Takt Pendlerzeit (Mo-Fr)</option>
+                        <option value="takt_wochenende">Ø Takt Freizeit (Sa-So)</option>
+                        <option value="anzahl_haltestellen">Anzahl Haltestellen</option>
+                    </select>
+                </div>
+
+                <div class="data-panel active-kachel">
+                    <div class="panel-title">Ausgewählte Rasterzelle</div>
+                    <table class="data-table">
+                        <tr>
+                            <td class="label">Kachel-ID</td>
+                            <td id="dashKachelId" class="value">-</td>
+                        </tr>
+                        <tr>
+                            <td class="label">Einwohnerzahl</td>
+                            <td id="dashEinwohner" class="value">-</td>
+                        </tr>
+                        <tr>
+                            <td class="label">Strukturelle Zone</td>
+                            <td id="dashZone" class="value">-</td>
+                        </tr>
+                        <tr>
+                            <td class="label">Haltestellen im Raster</td>
+                            <td id="dashHaltestellen" class="value">-</td>
+                        </tr>
+                    </table>
+                    <div class="control-group" style="margin-top: 12px;">
+                        <span class="label" style="font-size: 11px;">Kreuzende Linien</span>
+                        <div id="dashLinien" class="lines-badge">Keine Kachel selektiert</div>
+                    </div>
+                </div>
+
+                <div class="data-panel">
+                    <div class="panel-title">Erreichbarkeit: Daseinsvorsorge</div>
+                    <table class="data-table">
+                        <tr>
+                            <td class="label">Nächstes Krankenhaus</td>
+                            <td id="dashHospital" class="value">-</td>
+                        </tr>
+                        <tr>
+                            <td class="label">Nächstes Rathaus</td>
+                            <td id="dashTownhall" class="value">-</td>
+                        </tr>
+                        <tr>
+                            <td class="label">Nächster Fernbahnhof</td>
+                            <td id="dashBahnhof" class="value">-</td>
+                        </tr>
+                    </table>
+                </div>
+
+                <div class="data-panel">
+                    <div class="panel-title">Erreichbarkeit: Freizeit & Kultur</div>
+                    <table class="data-table">
+                        <tr>
+                            <td class="label">Nächstes Kino</td>
+                            <td id="dashCinema" class="value">-</td>
+                        </tr>
+                        <tr>
+                            <td class="label">Nächstes Theater</td>
+                            <td id="dashTheatre" class="value">-</td>
+                        </tr>
+                        <tr>
+                            <td class="label">Nächster Zoo</td>
+                            <td id="dashZoo" class="value">-</td>
+                        </tr>
+                    </table>
+                </div>
+
+                <div class="data-panel">
+                    <div class="panel-title">24h-Fahrplanprofil (Wochentag)</div>
+                    <div class="chart-container">
+                        <canvas id="taktChart" height="180"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" 
+            integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>
