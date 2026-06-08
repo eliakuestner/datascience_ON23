@@ -46,9 +46,11 @@ app.add_middleware(
 
 # Das exakte Spaltenverzeichnis eurer Tabelle
 # Das exakte Spaltenverzeichnis eurer Tabelle in backend/main.py
+# Das exakte Spaltenverzeichnis eurer Tabelle in backend/main.py
 DETAIL_COLUMNS = [
     "kachel_id", "x_min", "y_min", "einwohner", "bevoelkerungs_klasse",
-    "p1_lat", "p1_lon", "p2_lat", "p2_lon", "p3_lat", "p3_lon", "p4_lat", "p4_lon",  # <-- HIER HINZUFÜGEN!
+    "adresse",  # <--- GENAU HIER HINZUFÜGEN!
+    "p1_lat", "p1_lon", "p2_lat", "p2_lon", "p3_lat", "p3_lon", "p4_lat", "p4_lon",
     "dist_hospital_km", "nearest_hospital_name",
     "dist_townhall_km", "nearest_townhall_name",
     "dist_bahnhof_km", "nearest_bahnhof_name",

@@ -1,17 +1,31 @@
 import os
 import sys
+import time  # Für das time.sleep()
 import pandas as pd
 import geopandas as gpd
 from shapely.geometry import Polygon, Point
 from sqlalchemy import create_engine
 from dotenv import load_dotenv
 
+# HIER SIND DIE FEHLENDEN IMPORTS FÜR GEOPY:
+from geopy.geocoders import Nominatim
+from geopy.extra.rate_limiter import RateLimiter
 
-# .env laden
-load_dotenv(os.path.join(os.getcwd(), '.env'))
+# .env laden - Absolut und unfehlbar basierend auf dem Projekt-Hauptverzeichnis
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+load_dotenv(os.path.join(BASE_DIR, ".env"))
 
 def get_db_engine():
-    db_url = f"postgresql+psycopg2://{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD')}@{os.getenv('DB_HOST')}:{os.getenv('DB_PORT')}/{os.getenv('DB_NAME')}"
+    db_user = os.getenv("DB_USER")
+    db_pass = os.getenv("DB_PASSWORD")
+    db_host = os.getenv("DB_HOST")
+    db_port = os.getenv("DB_PORT")
+    db_name = os.getenv("DB_NAME")
+    
+    if not all([db_user, db_pass, db_host, db_port, db_name]):
+        raise ValueError("❌ Fehler: Die .env-Datei konnte nicht geladen werden oder ist unvollständig!")
+        
+    db_url = f"postgresql+psycopg2://{db_user}:{db_pass}@{db_host}:{db_port}/{db_name}"
     return create_engine(db_url)
 
 def classify_zone(einwohner):
@@ -64,12 +78,18 @@ def run_etl_pipeline():
     gdf_grid['einwohner'] = gdf_grid['einwohner'].fillna(0).astype(int)
 
     # --- SCHRITT D: BLITZSCHNELLE ECKPUNKT-BERECHNUNG ---
-    print("🌍 Berechne Eckpunkte via Vektor-Transformation...")
+   # --- SCHRITT D: BLITZSCHNELLE ECKPUNKT- & ADRESS-BERECHNUNG ---
+    print("🌍 Berechne Eckpunkte und Adressen für die Kachelmitten...")
     gdf_grid_wgs84 = gdf_grid.to_crs("EPSG:4326")
+    
     p1_lats, p1_lons = [], []
     p2_lats, p2_lons = [], []
     p3_lats, p3_lons = [], []
     p4_lats, p4_lons = [], []
+    mitten_lats, mitten_lons = [], []
+    
+    # Zentroiden (Mitte) berechnen und nach WGS84 transformieren
+    gdf_centroids_wgs84 = gpd.GeoDataFrame(geometry=gdf_grid.geometry.centroid, crs="EPSG:3035").to_crs("EPSG:4326")
     
     for geom in gdf_grid_wgs84['geometry']:
         coords = list(geom.exterior.coords)
@@ -77,11 +97,55 @@ def run_etl_pipeline():
         p2_lats.append(coords[1][1]); p2_lons.append(coords[1][0])
         p3_lats.append(coords[2][1]); p3_lons.append(coords[2][0])
         p4_lats.append(coords[3][1]); p4_lons.append(coords[3][0])
+
+    for geom in gdf_centroids_wgs84['geometry']:
+        mitten_lats.append(geom.y)
+        mitten_lons.append(geom.x)
         
     gdf_grid['p1_lat'] = p1_lats; gdf_grid['p1_lon'] = p1_lons
     gdf_grid['p2_lat'] = p2_lats; gdf_grid['p2_lon'] = p2_lons
     gdf_grid['p3_lat'] = p3_lats; gdf_grid['p3_lon'] = p3_lons
     gdf_grid['p4_lat'] = p4_lats; gdf_grid['p4_lon'] = p4_lons
+    
+    # Absolut stabiler Geolocator mit dediziertem User-Agent und vergrößertem Timeout
+    geolocator = Nominatim(user_agent="karlsruhe_opnv_analytics_platform_six_sem")
+    
+    adressen = []
+    print("📍 Frage Kachel-Adressen via Reverse Geocoding ab...")
+    
+    for i, (lat, lon) in enumerate(zip(mitten_lats, mitten_lons)):
+        # Kleiner, erzwungener Sleep, damit OSM uns wegen zu vielen Anfragen (HTTP 429) nicht blockiert
+        time.sleep(1.1)
+        
+        try:
+            # Wir fordern explizit strukturierte Futterdaten an
+            location = geolocator.reverse((lat, lon), timeout=15, language="de")
+            
+            if location and location.raw and 'address' in location.raw:
+                addr_details = location.raw['address']
+                
+                # Sucht den passendsten Ortsnamen (Stadtteil, Dorf oder Stadt)
+                ort = addr_details.get('suburb') or addr_details.get('village') or addr_details.get('town') or addr_details.get('city') or "Region Karlsruhe"
+                strasse = addr_details.get('road')
+                
+                if strasse:
+                    anzeige_text = f"{ort}, {strasse}"
+                else:
+                    anzeige_text = f"{ort}"
+                    
+                adressen.append(anzeige_text)
+            else:
+                adressen.append(f"Bereich {round(lat, 3)} / {round(lon, 3)}")
+                
+        except Exception as e:
+            # Falls ein Timeout oder Netzwerkfehler auftritt, schreiben wir lesbare Koordinaten statt eines Fehlers
+            print(f"   ⚠️ temporärer Fehler bei Kachel {i+1}: {str(e)}")
+            adressen.append(f"Bereich {round(lat, 3)} / {round(lon, 3)}")
+        
+        if (i + 1) % 5 == 0 or (i + 1) == len(mitten_lats):
+            print(f"   -> {i + 1} / {len(mitten_lats)} Adressen erfolgreich verarbeitet...")
+
+    gdf_grid['adresse'] = adressen
     gdf_grid['bevoelkerungs_klasse'] = gdf_grid['einwohner'].apply(classify_zone)
 
     # --- SCHRITT E: POI-INTEGRATION ---
