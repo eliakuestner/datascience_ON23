@@ -5,6 +5,9 @@ let gridLayerGroup;
 let legendControl = null;
 let taktChartInstance = null;
 
+// Hält die Referenz auf die aktuell angeklickte Kachel (für das schwarze Highlight)
+let selectedLayer = null;
+
 // Sicherheits-Leine: Vorab mit Nullen füllen, damit der Chart beim Start nicht abstürzt
 let rawHourlyDataFromDB = Array(24).fill(0);
 
@@ -118,6 +121,9 @@ async function loadGridData() {
     const indicator = indicatorElement.value;
     gridLayerGroup.clearLayers(); 
 
+    // Bei Indikator-Wechsel Selektion aufheben, da Kacheln neu generiert werden
+    selectedLayer = null;
+
     // Aktualisiere das Map-Overlay (die Legende) passend zum Indikator
     updateMapLegend(indicator);
 
@@ -139,7 +145,6 @@ async function loadGridData() {
                 [kachel.p4_lat, kachel.p4_lon]  
             ];
 
-            // FIX: Verwende absolute Werte für Einwohner-Klassifizierung und relative für Haltestellen
             const fillColor = getColorForScale(kachel.value, maxVal, indicator);
             const fillOpacity = getOpacityForScale(kachel.value, maxVal, indicator);
 
@@ -151,25 +156,66 @@ async function loadGridData() {
                 interactive: true
             });
 
+            // Metadaten an das Objekt hängen, um Styles dynamisch zurückzusetzen
+            poly.defaultColor = "#C7CFE3";
+            poly.defaultWeight = 0.5;
+            poly.defaultFillOpacity = fillOpacity;
+
+            // --- INTERAKTIONS-LOGIK (HOVER & SELECTION) ---
             poly.on("mouseover", (e) => {
                 const layer = e.target;
+                // Nur wenn das Element NICHT selektiert ist, den roten Hover-Effekt zeigen
+                if (layer !== selectedLayer) {
+                    layer.setStyle({
+                        color: "#E3000B",   // Signalrot bei Hover
+                        weight: 2,
+                        fillOpacity: Math.min(layer.defaultFillOpacity + 0.15, 0.95)
+                    });
+                    layer.bringToFront();
+                }
+            });
+
+            poly.on("mouseout", (e) => {
+                const layer = e.target;
+                // Wenn es das aktive Element ist, bleibt es schwarz umrandet
+                if (layer === selectedLayer) {
+                    layer.setStyle({
+                        color: "#1a1a1a",
+                        weight: 2.5,
+                        fillOpacity: layer.defaultFillOpacity
+                    });
+                } else {
+                    // Ansonsten zurück zum feinen, graublauen Standard-Kachelrand
+                    layer.setStyle({
+                        color: layer.defaultColor,
+                        weight: layer.defaultWeight,
+                        fillOpacity: layer.defaultFillOpacity
+                    });
+                }
+            });
+
+            poly.on("click", (e) => {
+                const layer = e.target;
+
+                // 1. Vorherige Kachel wieder in den Normalzustand versetzen
+                if (selectedLayer && selectedLayer !== layer) {
+                    selectedLayer.setStyle({
+                        color: selectedLayer.defaultColor,
+                        weight: selectedLayer.defaultWeight,
+                        fillOpacity: selectedLayer.defaultFillOpacity
+                    });
+                }
+
+                // 2. Neue Kachel als selektiert speichern und fetten schwarzen Rahmen setzen
+                selectedLayer = layer;
                 layer.setStyle({
-                    color: "#1a1a1a",   // Minimalistischer dunkler Rahmen bei Hover
-                    weight: 1.5,
-                    fillOpacity: Math.min(fillOpacity + 0.15, 0.95)
+                    color: "#1a1a1a",    // Striktes Flat-Design Anthrazit/Schwarz
+                    weight: 2.5,
+                    fillOpacity: layer.defaultFillOpacity
                 });
                 layer.bringToFront();
-            });
 
-            poly.on("mouseout", () => {
-                poly.setStyle({
-                    color: "#C7CFE3",
-                    weight: 0.5,
-                    fillOpacity: fillOpacity
-                });
-            });
-
-            poly.on("click", () => {
+                // 3. API-Call für die Sidebar-Details ausführen
                 loadKachelDetails(kachel.kachel_id);
             });
 
@@ -188,17 +234,14 @@ async function loadGridData() {
 
 // --- 5. STUFENLOSE & KLASSIFIZIERTE FARBSKALA ---
 function getColorForScale(value, maxVal, indicator) {
-    if (value === 0) return "#ff0000"; // Unbesiedelt / Leer
+    if (value === 0) return "#eef1f6"; 
 
     if (indicator === 'einwohner') {
-        // FIX: Striktes, unbestechliches 5-Stufen-System basierend auf eurer Zensus-Metrik
-        if (value <= 4500) return "#ffb3b3";  // Ländliche Zone (Hellrot)
-        if (value <= 13500) return "#ffd9b3"; // Aussenstädtische Zone (Blasses Orange)
-        if (value <= 36000) return "#a3ffa3"; // Urbane Kernzone (Hellgrün)
-        return "#00c832a3";                     // Metropolitane Kernzone (Knallgrün)
+        if (value <= 4500) return "#ffb3b3";  
+        if (value <= 13500) return "#ffd9b3"; 
+        if (value <= 36000) return "#a3ffa3"; 
+        return "#00c832";                     
     } else {
-        // FIX: Stufenlose RGB-Farblinear-Interpolation für Haltestellendichte
-        // Interpoliert fließend zwischen Hellrot (255, 179, 179) und Knallgrün (0, 200, 50)
         const val = value / maxVal;
         const r = Math.round(255 + (0 - 255) * val);
         const g = Math.round(179 + (200 - 179) * val);
@@ -207,17 +250,16 @@ function getColorForScale(value, maxVal, indicator) {
     }
 }
 
-// --- 6. DYNAMISCHES TRANSPARENZ-SYSTEM (Je weniger desto blasser/transparenter) ---
+// --- 6. DYNAMISCHES TRANSPARENZ-SYSTEM ---
 function getOpacityForScale(value, maxVal, indicator) {
-    if (value === 0) return 0.15; // Extrem blass für leere Zonen
+    if (value === 0) return 0.15; 
 
     if (indicator === 'einwohner') {
-        if (value <= 4500) return 0.40;  // Ländlich = Hohe Transparenz
-        if (value <= 13500) return 0.55; // Außenstädtisch = Mittlere Transparenz
-        if (value <= 36000) return 0.75; // Urban = Solide Deckkraft
-        return 0.90;                     // Metropolitan = Voller Fokus (Fast deckend)
+        if (value <= 4500) return 0.40;  
+        if (value <= 13500) return 0.55; 
+        if (value <= 36000) return 0.75; 
+        return 0.90;                     
     } else {
-        // Stufenloser Transparenz-Verlauf für Haltestellen (von 0.40 bis 0.90)
         const val = value / maxVal;
         return 0.40 + (0.50 * val);
     }
@@ -234,7 +276,6 @@ function updateMapLegend(indicator) {
     legendControl.onAdd = function () {
         const div = L.DomUtil.create("div", "map-legend");
         
-        // Striktes Modern Minimalist / Flat Design
         div.style.background = "#ffffff";
         div.style.padding = "12px";
         div.style.border = "1px solid #C7CFE3";
@@ -254,7 +295,7 @@ function updateMapLegend(indicator) {
                 "Urbane Kernzone: > 13.500 - 36.000 Einw.",
                 "Metropolitane Kernzone: > 36.000 Einw."
             ];
-            const colors = ["#ffb5b5", "#ffb3b3", "#ffd9b3", "#a3ffa3", "#00c832"];
+            const colors = ["#eef1f6", "#ffb3b3", "#ffd9b3", "#a3ffa3", "#00c832"];
             const opacities = [0.15, 0.40, 0.55, 0.75, 0.90];
             
             for (let i = 0; i < colors.length; i++) {
@@ -265,7 +306,6 @@ function updateMapLegend(indicator) {
                     </div>`;
             }
         } else {
-            // Kontinuierliche Farbleiste für stufenlosen Haltestellen-Verlauf
             html += `
                 <div style="display:flex; flex-direction:column; gap:6px; width:190px;">
                     <div style="background:linear-gradient(to right, #ffb3b3, #00c832); height:14px; border:1px solid #C7CFE3; width:100%;"></div>

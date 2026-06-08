@@ -100,13 +100,14 @@ DETAIL_COLUMNS = [
 
 
 def _validate_indicator(indicator: str) -> str:
-    normalized = indicator.strip()
-    if normalized not in ALLOWED_INDICATORS:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unbekannter Indikator '{indicator}'. Erlaubt sind: {', '.join(sorted(ALLOWED_INDICATORS))}",
-        )
-    return normalized
+    # Erlaubte Mapping-Spaltennamen aus eurer Datenbank-Tabelle definieren
+    allowed = {
+        "einwohner": "einwohner",
+        "anzahl_haltestellen": "anzahl_haltestellen"
+    }
+    if indicator not in allowed:
+        raise HTTPException(status_code=400, detail="Ungültiger Indikator")
+    return allowed[indicator]
 
 
 def _rows_to_dicts(rows: list[Any]) -> list[dict[str, Any]]:
