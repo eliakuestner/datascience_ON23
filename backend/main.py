@@ -117,15 +117,14 @@ def _rows_to_dicts(rows: list[Any]) -> list[dict[str, Any]]:
 
 def _fetch_kacheln_sync(indicator: str) -> list[dict[str, Any]]:
     column = _validate_indicator(indicator)
-    # FIX: Alias von 'indikator' auf 'value' geändert, passend zur Frontend-Spezifikation
     query = text(
         f"""
         SELECT
             kachel_id,
-            lat_min,
-            lon_min,
-            lat_max,
-            lon_max,
+            p1_lat, p1_lon,
+            p2_lat, p2_lon,
+            p3_lat, p3_lon,
+            p4_lat, p4_lon,
             {column} AS value
         FROM public.kachel_analytics
         ORDER BY kachel_id
@@ -133,9 +132,21 @@ def _fetch_kacheln_sync(indicator: str) -> list[dict[str, Any]]:
     )
 
     with ENGINE.connect() as connection:
-        rows = connection.execute(query).fetchall()
-
-    return _rows_to_dicts(rows)
+        result = connection.execute(query)
+        
+        # _mapping sorgt dafür, dass die Spalten unbestechlich ausgelesen werden
+        kacheln = [
+            {
+                "kachel_id": int(row._mapping["kachel_id"]),
+                "p1_lat": float(row._mapping["p1_lat"]), "p1_lon": float(row._mapping["p1_lon"]),
+                "p2_lat": float(row._mapping["p2_lat"]), "p2_lon": float(row._mapping["p2_lon"]),
+                "p3_lat": float(row._mapping["p3_lat"]), "p3_lon": float(row._mapping["p3_lon"]),
+                "p4_lat": float(row._mapping["p4_lat"]), "p4_lon": float(row._mapping["p4_lon"]),
+                "value": float(row._mapping["value"]) if row._mapping["value"] is not None else 0.0
+            }
+            for row in result
+        ]
+        return kacheln
 
 
 def _fetch_kachel_detail_sync(kachel_id: int) -> dict[str, Any] | None:

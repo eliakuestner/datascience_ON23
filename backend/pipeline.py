@@ -1,7 +1,7 @@
 import os
 import pandas as pd
 import geopandas as gpd
-from shapely.geometry import Polygon, Point
+from shapely.geometry import Polygon, Point, MultiPoint
 from sqlalchemy import create_engine
 from dotenv import load_dotenv
 
@@ -25,72 +25,96 @@ def time_to_minutes(t_str):
 
 def run_etl_pipeline():
     engine = get_db_engine()
-    print("🚀 Starte finale raum-begrenzte High-Performance ETL-Pipeline...")
+    print("🚀 Starte mathematisch exakte High-Performance ETL-Pipeline für Karlsruhe...")
 
-    # --- SCHRITT A: ERMITTLUNG DER KARLSRUHE BOUNDING BOX AUS POIS ---
-    print("📍 Analysiere geografische Ausdehnung der Region Karlsruhe...")
+    # --- SCHRITT A: CRS-DETEKTION FÜR LOKALE POIs ---
     df_pois_raw = pd.read_sql("SELECT \"X\" as x, \"Y\" as y FROM karlsruhe_pois_datensatz LIMIT 10", engine)
     sample_x = df_pois_raw['x'].iloc[0]
-    
-    if sample_x < 180:
-        poi_src_crs = "EPSG:4326"
-    elif 4000000 < sample_x < 5000000:
-        poi_src_crs = "EPSG:3035"
-    elif 3000000 < sample_x < 4000000:
-        poi_src_crs = "EPSG:31467"
-    else:
-        poi_src_crs = "EPSG:25832"
+    if sample_x < 180: poi_src_crs = "EPSG:4326"
+    elif 4000000 < sample_x < 5000000: poi_src_crs = "EPSG:3035"
+    elif 3000000 < sample_x < 4000000: poi_src_crs = "EPSG:31467"
+    else: poi_src_crs = "EPSG:25832"
 
-    df_pois_bounds = pd.read_sql("SELECT MIN(\"X\") as min_x, MAX(\"X\") as max_x, MIN(\"Y\") as min_y, MAX(\"Y\") as max_y FROM karlsruhe_pois_datensatz", engine)
+    # --- SCHRITT B: GEOMETRISCHE HÜLLE AUS REALEN DATENPUNKTEN ---
+    print("🎯 Berechne lückenlose Netzhülle aus Haltestellen und POIs...")
     
-    # In das metrische Zensus-System (EPSG:3035) transformieren um Grenzen festzulegen
-    bounds_gdf = gpd.GeoDataFrame(
-        geometry=[
-            Point(df_pois_bounds['min_x'].iloc[0], df_pois_bounds['min_y'].iloc[0]),
-            Point(df_pois_bounds['max_x'].iloc[0], df_pois_bounds['max_y'].iloc[0])
-        ], 
+    # Haltestellen im Zielgebiet laden (Reale Punktgeometrien)
+    df_stops_mask = pd.read_sql("""
+        SELECT stop_lat, stop_lon FROM stops 
+        WHERE stop_lat BETWEEN 48.70 AND 49.32
+          AND stop_lon BETWEEN 8.15 AND 8.85
+    """, engine)
+    
+    gdf_stops_mask = gpd.GeoDataFrame(
+        df_stops_mask, 
+        geometry=gpd.points_from_xy(df_stops_mask.stop_lon, df_stops_mask.stop_lat), 
+        crs="EPSG:4326"
+    ).to_crs("EPSG:3035")
+    
+    # Mathematisch exaktes Snapping für reale Punkte
+    gdf_stops_mask['x_3k'] = (gdf_stops_mask.geometry.x // 3000) * 3000
+    gdf_stops_mask['y_3k'] = (gdf_stops_mask.geometry.y // 3000) * 3000
+    cells_stops = gdf_stops_mask[['x_3k', 'y_3k']].drop_duplicates()
+
+    # POIs laden (Reale Punktgeometrien)
+    df_pois_mask = pd.read_sql("SELECT \"X\" as x, \"Y\" as y FROM karlsruhe_pois_datensatz", engine)
+    gdf_pois_mask = gpd.GeoDataFrame(
+        df_pois_mask, 
+        geometry=gpd.points_from_xy(df_pois_mask.x, df_pois_mask.y), 
         crs=poi_src_crs
     ).to_crs("EPSG:3035")
     
-    # Bounding Box mit 20km Puffer erweitern, um das Karlsruher Umland komplett abzufangen
-    x_min_bounds = bounds_gdf.geometry.iloc[0].x - 20000
-    y_min_bounds = bounds_gdf.geometry.iloc[0].y - 20000
-    x_max_bounds = bounds_gdf.geometry.iloc[1].x + 20000
-    y_max_bounds = bounds_gdf.geometry.iloc[1].y + 20000
+    gdf_pois_mask['x_3k'] = (gdf_pois_mask.geometry.x // 3000) * 3000
+    gdf_pois_mask['y_3k'] = (gdf_pois_mask.geometry.y // 3000) * 3000
+    cells_pois = gdf_pois_mask[['x_3k', 'y_3k']].drop_duplicates()
 
-    # --- SCHRITT B: FILTERUNG DER ZENSUS-DATEN DIREKT IN DER DB ---
-    print("📦 Lade Zensus-Daten (Exklusiv gefiltert auf Region Karlsruhe)...")
+    df_valid_cells = pd.concat([cells_stops, cells_pois]).drop_duplicates().reset_index(drop=True)
+    
+    # Erzeuge eine solide, geschlossene Hülle (Convex Hull) um das reale Versorgungsgebiet
+    valid_points = [Point(r['x_3k'] + 1500, r['y_3k'] + 1500) for _, r in df_valid_cells.iterrows()]
+    region_mantel = MultiPoint(valid_points).convex_hull
+
+    # Abfragefenster für die Datenbank ermitteln
+    x_min_q, x_max_q = df_valid_cells['x_3k'].min() - 6000, df_valid_cells['x_3k'].max() + 6000
+    y_min_q, y_max_q = df_valid_cells['y_3k'].min() - 6000, df_valid_cells['y_3k'].max() + 6000
+
+    # --- SCHRITT C: ZENSUS-DATEN KORRIGIEREN & LADEN ---
+    print("📦 Transformiere Zensus-Mittelpunkte auf Kachel-Unterkanten...")
     df_zensus = pd.read_sql(f"""
         SELECT x_mp_1km, y_mp_1km, "Einwohner" as einwohner 
         FROM zensus2022_bevoelkerungszahl
-        WHERE x_mp_1km BETWEEN {x_min_bounds} AND {x_max_bounds}
-          AND y_mp_1km BETWEEN {y_min_bounds} AND {y_max_bounds}
+        WHERE x_mp_1km BETWEEN {x_min_q} AND {x_max_q}
+          AND y_mp_1km BETWEEN {y_min_q} AND {y_max_q}
     """, engine)
     
-    # Grid-Berechnung (Abrundung auf 3000 Meter Kantenlänge)
-    df_zensus['x_3k'] = (df_zensus['x_mp_1km'] // 3000) * 3000
-    df_zensus['y_3k'] = (df_zensus['y_mp_1km'] // 3000) * 3000
+    # DER MATHEMATISCHE FIX: 500m Subtraktion korrigiert den Mittelpunkt-Versatz exakt!
+    df_zensus['x_left'] = df_zensus['x_mp_1km'] - 500
+    df_zensus['y_bottom'] = df_zensus['y_mp_1km'] - 500
+    
+    df_zensus['x_3k'] = (df_zensus['x_left'] // 3000) * 3000
+    df_zensus['y_3k'] = (df_zensus['y_bottom'] // 3000) * 3000
     df_grid_base = df_zensus.groupby(['x_3k', 'y_3k']).agg({'einwohner': 'sum'}).reset_index()
-    df_grid_base['kachel_id'] = df_grid_base.index + 1
-    print(f"📊 Kacheln im erweiterten Raum Karlsruhe: {len(df_grid_base)}")
 
-    # --- SCHRITT C: GEOMETRIEN & GPS BOUNDS FÜR LEAFLET ---
-    print("🌍 Berechne räumliche Kacheln und GPS-Ecken...")
-    points_min = [Point(r['x_3k'], r['y_3k']) for _, r in df_grid_base.iterrows()]
-    points_max = [Point(r['x_3k'] + 3000, r['y_3k'] + 3000) for _, r in df_grid_base.iterrows()]
-    
-    gdf_min = gpd.GeoDataFrame(geometry=points_min, crs="EPSG:3035").to_crs("EPSG:4326")
-    gdf_max = gpd.GeoDataFrame(geometry=points_max, crs="EPSG:3035").to_crs("EPSG:4326")
-    
-    df_grid_base['lon_min'] = gdf_min.geometry.x
-    df_grid_base['lat_min'] = gdf_min.geometry.y
-    df_grid_base['lon_max'] = gdf_max.geometry.x
-    df_grid_base['lat_max'] = gdf_max.geometry.y
-    
+    # Erzeuge das geometrische Grid im EPSG:3035 System
     polygons = [Polygon([(r['x_3k'], r['y_3k']), (r['x_3k'] + 3000, r['y_3k']), (r['x_3k'] + 3000, r['y_3k'] + 3000), (r['x_3k'], r['y_3k'] + 3000)]) for _, r in df_grid_base.iterrows()]
-    gdf_grid = gpd.GeoDataFrame(df_grid_base, geometry=polygons, crs="EPSG:3035")
+    gdf_grid_all = gpd.GeoDataFrame(df_grid_base, geometry=polygons, crs="EPSG:3035")
 
-    # Eure exakte Definition der Einwohnerdichte-Klassen pro 9km² Kachel
+    # Filterung über die solide Hülle -> Schließt alle inneren Löcher komplett!
+    gdf_grid = gdf_grid_all[gdf_grid_all.geometry.intersects(region_mantel)].reset_index(drop=True)
+    gdf_grid['kachel_id'] = gdf_grid.index + 1
+
+    # --- SCHRITT D: GPS-TRANSFORMATION (PROJEKTIONSTREU) ---
+    print("🌍 Projiziere Kachel-Ecken fehlerfrei nach WGS84 (Leaflet)...")
+    p1 = gpd.GeoDataFrame(geometry=[Point(r['x_3k'], r['y_3k']) for _, r in gdf_grid.iterrows()], crs="EPSG:3035").to_crs("EPSG:4326")
+    p2 = gpd.GeoDataFrame(geometry=[Point(r['x_3k'] + 3000, r['y_3k']) for _, r in gdf_grid.iterrows()], crs="EPSG:3035").to_crs("EPSG:4326")
+    p3 = gpd.GeoDataFrame(geometry=[Point(r['x_3k'] + 3000, r['y_3k'] + 3000) for _, r in gdf_grid.iterrows()], crs="EPSG:3035").to_crs("EPSG:4326")
+    p4 = gpd.GeoDataFrame(geometry=[Point(r['x_3k'], r['y_3k'] + 3000) for _, r in gdf_grid.iterrows()], crs="EPSG:3035").to_crs("EPSG:4326")
+    
+    gdf_grid['p1_lat'], gdf_grid['p1_lon'] = p1.geometry.y, p1.geometry.x
+    gdf_grid['p2_lat'], gdf_grid['p2_lon'] = p2.geometry.y, p2.geometry.x
+    gdf_grid['p3_lat'], gdf_grid['p3_lon'] = p3.geometry.y, p3.geometry.x
+    gdf_grid['p4_lat'], gdf_grid['p4_lon'] = p4.geometry.y, p4.geometry.x
+
     def classify_zone(e):
         if e == 0: return "Unbesiedelte Zone"
         elif e <= 4500: return "Ländliche Zone"
@@ -99,8 +123,8 @@ def run_etl_pipeline():
         else: return "Metropolitane Kernzone"
     gdf_grid['bevoelkerungs_klasse'] = gdf_grid['einwohner'].apply(classify_zone)
 
-    # --- SCHRITT D: POI-DISTANZEN (KINO, THEATER, ZOO) ---
-    print("🏥 Analysiere POI-Distanzen (Infrastruktur & Kultur)...")
+    # --- SCHRITT E: POI-DISTANZEN ---
+    print("🏥 Analysiere POI-Distanzen...")
     df_pois = pd.read_sql("SELECT name, poi_type, \"X\" as x, \"Y\" as y FROM karlsruhe_pois_datensatz", engine)
     gdf_pois = gpd.GeoDataFrame(df_pois, geometry=gpd.points_from_xy(df_pois.x, df_pois.y), crs=poi_src_crs).to_crs("EPSG:3035")
 
@@ -122,10 +146,12 @@ def run_etl_pipeline():
             gdf_grid[f'dist_{prefix}_km'] = None
             gdf_grid[f'nearest_{prefix}_name'] = "Kein Eintrag"
 
-    # --- SCHRITT E: GTFS-AGREGGATION MIT STRING-CAST-SCHUTZ ---
-    print("🚌 Verarbeite GTFS-Komponenten aus der Datenbank...")
+    # --- SCHRITT F: GTFS AGGREGATION ---
+    print("🚌 Verarbeite GTFS-Komponenten...")
     df_stops = pd.read_sql("SELECT stop_id, stop_lat, stop_lon FROM stops", engine)
     gdf_stops = gpd.GeoDataFrame(df_stops, geometry=gpd.points_from_xy(df_stops.stop_lon, df_stops.stop_lat), crs="EPSG:4326").to_crs("EPSG:3035")
+    
+    # Identische metrische Zuordnung für die Haltestellen
     gdf_stops['x_3k'] = (gdf_stops.geometry.x // 3000) * 3000
     gdf_stops['y_3k'] = (gdf_stops.geometry.y // 3000) * 3000
 
@@ -134,7 +160,6 @@ def run_etl_pipeline():
     df_st = pd.read_sql("SELECT trip_id, stop_id, arrival_time FROM stop_times", engine)
     df_cal = pd.read_sql("SELECT service_id, monday, tuesday, wednesday, thursday, friday, saturday, sunday FROM calendar", engine)
 
-    # Typbereinigung für fehlerfreie Verknüpfungen
     for df in [df_st, gdf_stops]: df['stop_id'] = df['stop_id'].astype(str).str.strip()
     for df in [df_st, df_trips]: df['trip_id'] = df['trip_id'].astype(str).str.strip()
     for df in [df_trips, df_routes]: df['route_id'] = df['route_id'].astype(str).str.strip()
@@ -155,7 +180,6 @@ def run_etl_pipeline():
             lambda x: ", ".join(sorted(x.dropna().unique().astype(str)))
         ).reset_index(name='linien_liste')
 
-        # Taktungen berechnen (Pendlerzeitfenster: Mo-Fr, 6:30-8:30 & 16:00-18:30 = 4.5h)
         m_start, m_end = 6*60 + 30, 8*60 + 30
         a_start, a_end = 16*60, 18*60 + 30
         
@@ -167,7 +191,7 @@ def run_etl_pipeline():
         df_pendler_takt = df_pendler.groupby(['x_3k', 'y_3k']).size().reset_index(name='p_count')
         df_pendler_takt['takt_pendler_morgens'] = round(df_pendler_takt['p_count'] / (5.0 * 4.5), 2)
 
-        df_we = fahrten = df_fahrten[(df_fahrten['saturday'] == 1) | (df_fahrten['sunday'] == 1)]
+        df_we = df_fahrten[(df_fahrten['saturday'] == 1) | (df_fahrten['sunday'] == 1)]
         df_we_takt = df_we.groupby(['x_3k', 'y_3k']).size().reset_index(name='we_count')
         df_we_takt['takt_wochenende'] = round(df_we_takt['we_count'] / 48.0, 2)
 
@@ -177,14 +201,12 @@ def run_etl_pipeline():
         df_hourly_avg = (df_hourly / 5.0).round(1)
         df_hourly_str = df_hourly_avg.apply(lambda row: ",".join(row.astype(str)), axis=1).reset_index(name='takt_24h_array')
 
-        # Mergen an das räumlich begrenzte Hauptgrid
         gdf_grid = gdf_grid.merge(df_stops_count, on=['x_3k', 'y_3k'], how='left')
         gdf_grid = gdf_grid.merge(df_lines, on=['x_3k', 'y_3k'], how='left')
         gdf_grid = gdf_grid.merge(df_pendler_takt[['x_3k', 'y_3k', 'takt_pendler_morgens']], on=['x_3k', 'y_3k'], how='left')
         gdf_grid = gdf_grid.merge(df_we_takt[['x_3k', 'y_3k', 'takt_wochenende']], on=['x_3k', 'y_3k'], how='left')
         gdf_grid = gdf_grid.merge(df_hourly_str, on=['x_3k', 'y_3k'], how='left')
 
-    # Spalten absichern
     gdf_grid['anzahl_haltestellen'] = gdf_grid['anzahl_haltestellen'].fillna(0).astype(int)
     gdf_grid['linien_liste'] = gdf_grid['linien_liste'].fillna("Keine Linien")
     gdf_grid['takt_pendler_morgens'] = gdf_grid['takt_pendler_morgens'].fillna(0.0)
@@ -195,19 +217,17 @@ def run_etl_pipeline():
     max_takt = gdf_grid['takt_pendler_morgens'].max() if gdf_grid['takt_pendler_morgens'].max() > 0 else 1
     gdf_grid['oepnv_score'] = gdf_grid.apply(lambda r: round(((r['einwohner'] / max_einwohner) * 40) + ((r['takt_pendler_morgens'] / max_takt) * 60), 1), axis=1)
 
-    # Relevanzfilter für das Frontend
-    gdf_grid = gdf_grid[(gdf_grid['einwohner'] > 0) | (gdf_grid['anzahl_haltestellen'] > 0)].reset_index(drop=True)
-    print(f"📉 Finale Kachelanzahl exklusiv für Karlsruhe: {len(gdf_grid)}")
+    print(f"📉 Finale Kachelanzahl (Solides, lückenloses Verbundnetz): {len(gdf_grid)}")
 
-    # --- SCHRITT F: IN DIE DATENBANK SCHREIBEN ---
+    # --- SCHRITT G: SPEICHERN ---
     print("💾 Befülle Tabelle 'kachel_analytics'...")
     df_final = pd.DataFrame(gdf_grid.drop(columns='geometry')).rename(columns={'x_3k': 'x_min', 'y_3k': 'y_min'})
     
     with engine.begin() as conn:
-        conn.exec_driver_sql("TRUNCATE TABLE kachel_analytics;")
+        conn.exec_driver_sql("DROP TABLE IF EXISTS kachel_analytics;")
         
-    df_final.to_sql("kachel_analytics", engine, if_exists="append", index=False)
-    print("🎉 ETL-Pipeline erfolgreich beendet! Das Karlsruher Datenpaket steht perfekt.")
+    df_final.to_sql("kachel_analytics", engine, if_exists="replace", index=False)
+    print("🎉 ETL-Pipeline erfolgreich beendet!")
 
 if __name__ == "__main__":
     run_etl_pipeline()

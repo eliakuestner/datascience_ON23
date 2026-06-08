@@ -34,12 +34,14 @@
             width: 450px;
             height: 100%;
             background-color: #ffffff;
-            border-left: 2px solid #C7CFE3;
+            /* FIX: Rahmen an die rechte Seite verschieben */
+            border-right: 2px solid #C7CFE3; 
             display: flex;
             flex-direction: column;
             overflow-y: auto;
-            box-shadow: -2px 0 15px rgba(0,0,0,0.05);
-        }
+            /* FIX: Schatten nach rechts werfen (Minus-Zeichen entfernt) */
+            box-shadow: 2px 0 15px rgba(0,0,0,0.05); 
+}
 
         /* Dashboard Header */
         .sidebar-header {

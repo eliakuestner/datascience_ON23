@@ -42,69 +42,67 @@ function initEventListeners() {
 // --- 3. DATEN FÜR DIE KARTE ABRAFEN & ZEICHNEN ---
 async function loadGridData() {
     const indicator = document.getElementById("indicatorSelect").value;
-    gridLayerGroup.clearLayers(); // Alte Kacheln entfernen
+    gridLayerGroup.clearLayers(); 
 
     try {
         const response = await fetch(`${API_BASE_URL}/kacheln?indicator=${indicator}`);
         if (!response.ok) throw new Error("Fehler beim Abrufen der Kacheldaten");
         
-        const kacheln = await response.getJson ? await response.getJson() : await response.json();
+        const kacheln = await response.json();
 
-        // Extremwerte ermitteln für eine dynamische, relative Farbskala
         const values = kacheln.map(k => k.value);
         const maxVal = Math.max(...values, 1);
 
         kacheln.forEach(kachel => {
-            // Leaflet benötigt [lat, lon] für die Ecken des Rechtecks
-            const bounds = [
-                [kachel.lat_min, kachel.lon_min],
-                [kachel.lat_max, kachel.lon_max]
+            // Die 4 unbestechlichen Ecken aus dem GIS-Backend als geschlossener Pfad
+            const polygonPoints = [
+                [kachel.p1_lat, kachel.p1_lon], // Unten-Links
+                [kachel.p2_lat, kachel.p2_lon], // Unten-Rechts
+                [kachel.p3_lat, kachel.p3_lon], // Oben-Rechts
+                [kachel.p4_lat, kachel.p4_lon]  // Oben-Links
             ];
 
-            // Farbwert relativ zum Maximalwert berechnen
             const normalizedValue = kachel.value / maxVal;
             const fillColor = getColorForScale(normalizedValue);
 
-            // Kachel-Rechteck als Canvas-Objekt erzeugen
-            const rect = L.rectangle(bounds, {
-                color: "#C7CFE3",       // Standard-Rahmenfarbe (Muted Blaugrau)
+            // FIX: L.polygon statt L.rectangle verwenden für absolute Positionstreue!
+            const poly = L.polygon(polygonPoints, {
+                color: "#C7CFE3",       
                 weight: 0.5,
                 fillColor: fillColor,
                 fillOpacity: 0.6,
                 interactive: true
             });
 
-            // Hover-Effekte (Striktes Corporate Design)
-            rect.on("mouseover", (e) => {
+            // Interaktions-Logik bleibt voll funktionsfähig und performant
+            poly.on("mouseover", (e) => {
                 const layer = e.target;
                 layer.setStyle({
-                    color: "#E3000B",   // Signalroter Rahmen bei Hover
+                    color: "#E3000B",   
                     weight: 2,
                     fillOpacity: 0.85
                 });
                 layer.bringToFront();
             });
 
-            rect.on("mouseout", (e) => {
-                rect.setStyle({
+            poly.on("mouseout", () => {
+                poly.setStyle({
                     color: "#C7CFE3",
                     weight: 0.5,
                     fillOpacity: 0.6
                 });
             });
 
-            // Klick-Event: Details der Kachel abfragen und Dashboard füllen
-            rect.on("click", () => {
+            poly.on("click", () => {
                 loadKachelDetails(kachel.kachel_id);
             });
 
-            // Schnelles Info-Tooltip beim Drüberfahren
-            rect.bindTooltip(`Kachel ID: ${kachel.kachel_id}<br>Wert: ${kachel.value.toFixed(1)}`, {
+            poly.bindTooltip(`Kachel ID: ${kachel.kachel_id}<br>Wert: ${kachel.value.toFixed(1)}`, {
                 sticky: true,
                 direction: "top"
             });
 
-            gridLayerGroup.addLayer(rect);
+            gridLayerGroup.addLayer(poly);
         });
 
     } catch (error) {
