@@ -48,17 +48,16 @@ app.add_middleware(
 # Das exakte Spaltenverzeichnis eurer Tabelle in backend/main.py
 # Das exakte Spaltenverzeichnis eurer Tabelle in backend/main.py
 DETAIL_COLUMNS = [
-    "kachel_id", "x_min", "y_min", "einwohner", "bevoelkerungs_klasse", "adresse",
+    "kachel_id", "adresse", "einwohner", "bevoelkerungs_klasse", "anzahl_haltestellen", "linien_liste",
     "p1_lat", "p1_lon", "p2_lat", "p2_lon", "p3_lat", "p3_lon", "p4_lat", "p4_lon",
+    "takt_24h_mo", "takt_24h_di", "takt_24h_mi", "takt_24h_do", "takt_24h_fr", "takt_24h_sa", "takt_24h_so",
+    "takt_pendler_morgens", "takt_wochenende",
     "dist_hospital_km", "nearest_hospital_name", "hospital_lon", "hospital_lat",
     "dist_townhall_km", "nearest_townhall_name", "townhall_lon", "townhall_lat",
     "dist_bahnhof_km", "nearest_bahnhof_name", "bahnhof_lon", "bahnhof_lat",
     "dist_cinema_km", "nearest_cinema_name", "cinema_lon", "cinema_lat",
     "dist_theatre_km", "nearest_theatre_name", "theatre_lon", "theatre_lat",
-    "dist_zoo_km", "nearest_zoo_name", "zoo_lon", "zoo_lat",
-    "anzahl_haltestellen", "linien_liste",
-    "takt_pendler_morgens", "takt_wochenende", "oepnv_score",
-    "takt_24h_mo", "takt_24h_di", "takt_24h_mi", "takt_24h_do", "takt_24h_fr", "takt_24h_sa", "takt_24h_so"
+    "dist_zoo_km", "nearest_zoo_name", "zoo_lon", "zoo_lat"
 ]
 
 def _validate_indicator(indicator: str) -> str:
@@ -156,13 +155,35 @@ async def get_kacheln(
 
 
 @app.get("/api/kachel/{kachel_id}")
-async def get_kachel(kachel_id: int) -> dict[str, Any]:
-    result = await asyncio.to_thread(_fetch_kachel_detail_sync, kachel_id)
-    if result is None:
-        raise HTTPException(status_code=404, detail="Kachel nicht gefunden")
-    return result
-
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=False)
+async def get_kachel_details(kachel_id: int):
+    """Liefert alle Sidebar-Details, POIs und das Takt-Array für die Grafik."""
+    # FIX: Wir holen einfach ALLE Spalten aus der DB, damit garantiert kein Name verloren geht
+    query = "SELECT * FROM public.kachel_analytics WHERE kachel_id = :id LIMIT 1"
+    
+    with ENGINE.connect() as conn:
+        row = conn.execute(text(query), {"id": kachel_id}).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Kachel nicht gefunden")
+        
+        # In ein echtes Python-Dictionary umwandeln
+        data = dict(row._mapping)
+        
+        # Nur None-Werte sauber abfangen, ohne Datentypen (Floats) zu verändern!
+        clean_data = {}
+        for key, val in data.items():
+            if val is None:
+                if "dist" in key:
+                    clean_data[key] = 0.0
+                elif "anzahl" in key or "einwohner" in key:
+                    clean_data[key] = 0
+                else:
+                    clean_data[key] = "-"
+            else:
+                # WICHTIG: Floats als echte Zahlen belassen, nicht in Strings umwandeln!
+                clean_data[key] = val
+        
+        # Takt-Array Fallback absichern
+        if "takt_24h_array" not in clean_data or not clean_data["takt_24h_array"]:
+            clean_data["takt_24h_array"] = "0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0"
+            
+        return clean_data

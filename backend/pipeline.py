@@ -79,7 +79,6 @@ def run_etl_pipeline():
             joined[f'dist_{prefix}_km'] = round(joined['dist_m'] / 1000.0, 2)
             joined = joined.rename(columns={'name': f'nearest_{prefix}_name', 'x_lon': f'{prefix}_lon', 'y_lat': f'{prefix}_lat'})
             
-            # Jetzt joinen wir Distanz, Name UND die echten Koordinaten an das Grid
             gdf_grid = gdf_grid.merge(joined[['kachel_id', f'dist_{prefix}_km', f'nearest_{prefix}_name', f'{prefix}_lon', f'{prefix}_lat']], on='kachel_id', how='left')
         else:
             gdf_grid[f'dist_{prefix}_km'] = 0.0
@@ -94,7 +93,7 @@ def run_etl_pipeline():
     gdf_grid = gdf_grid.merge(df_lines, on=['x_3k', 'y_3k'], how='left')
     gdf_grid['linien_liste'] = gdf_grid['linien_liste'].fillna("Keine Linien")
 
-    # --- SCHRITT G: EMPIRISCHE 24H-FAHRPLANDATEN BERECHNEN (UNIQUE TRIPS & MODULO FIX) ---
+    # --- SCHRITT G: EMPIRISCHE 24H-FAHRPLANDATEN BERECHNEN ---
     print("📊 Berechne physische Fahrzeug-Frequenzen via Unique-Trip-ID...")
     query_takt = """
         SELECT st.stop_id, 
@@ -150,10 +149,9 @@ def run_etl_pipeline():
     gdf_grid = gdf_grid.merge(df_source_addresses, on='kachel_id', how='left')
     gdf_grid['adresse'] = gdf_grid['adresse'].fillna("Bereich Karlsruhe")
 
-# --- SCHRITT I: SPEICHERN ---
+    # --- SCHRITT I: SPEICHERN ---
     print("💾 Überschreibe public.kachel_analytics...")
     
-    # Explizites Sicherstellen, dass alle Eckpunkte und die neuen POI-Daten im finalen Export landen
     export_columns = [
         'kachel_id', 'x_min', 'y_min', 'anzahl_haltestellen', 'einwohner', 'bevoelkerungs_klasse', 'adresse', 'linien_liste',
         'p1_lat', 'p1_lon', 'p2_lat', 'p2_lon', 'p3_lat', 'p3_lon', 'p4_lat', 'p4_lon',
@@ -169,21 +167,23 @@ def run_etl_pipeline():
     
     df_final = pd.DataFrame(gdf_grid).rename(columns={'x_3k': 'x_min', 'y_3k': 'y_min'})
     
+    # =======================================================
+    # CRITICAL FIX: Säubert kachel_id Duplikate vor dem Export!
+    # =======================================================
+    df_final = df_final.drop_duplicates(subset=['kachel_id'], keep='first')
+    
     # Berechne den Score
     max_einwohner = df_final['einwohner'].max() if df_final['einwohner'].max() > 0 else 1
     max_takt = df_final['takt_pendler_morgens'].max() if df_final['takt_pendler_morgens'].max() > 0 else 1
     df_final['oepnv_score'] = df_final.apply(lambda r: round(((r['einwohner'] / max_einwohner) * 40) + ((r['takt_pendler_morgens'] / max_takt) * 60), 1), axis=1)
     
-    # Füge den Score zu den Export-Spalten hinzu
     export_columns.append('oepnv_score')
-    
-    # Nur die Spalten exportieren, die wirklich existieren und gebraucht werden
     df_final = df_final[[col for col in export_columns if col in df_final.columns]]
 
     with engine.begin() as conn:
         conn.exec_driver_sql("DROP TABLE IF EXISTS public.kachel_analytics;")
     df_final.to_sql("kachel_analytics", engine, if_exists="replace", index=False)
-    print("🎉 ETL-Pipeline erfolgreich beendet! Alle Eckpunkte und POI-Koordinaten sind sicher in der DB.")
+    print("🎉 ETL-Pipeline erfolgreich beendet! Alle Datensätze sind bereinigt und eindeutig.")
 
 if __name__ == "__main__":
     run_etl_pipeline()

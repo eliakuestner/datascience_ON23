@@ -9,8 +9,23 @@ in der vorgegebenen Reihenfolge ausgeführt werden.
 VORAUSSETZUNGEN:
 ----------------
 1. Python 3.11 oder höher installiert (inklusive pip).
-2. Eine laufende PostgreSQL-Datenbankinstanz mit Schreibrechten.
+2. Eine lauffähige DBeaver-Installation (oder ein vergleichbarer DB-Client).
 3. Eine aktive Internetverbindung (für Leaflet- und Chart.js-CDNs).
+
+========================================================================
+SCHRITT 0: CAMPUS-NETZWERKRECHTE (DHBW-VPN)
+========================================================================
+Da der PostgreSQL-Server, auf dem die Forschungsdaten liegen, innerhalb 
+des geschützten Hochschulnetzwerks der DHBW Mosbach gehostet wird, ist ein 
+externer Zugriff ohne verschlüsselten Tunnel blockiert.
+
+1. Starten Sie Ihren installierten VPN-Client (z. B. Cisco Secure Client).
+2. Verbinden Sie sich explizit mit dem Gateway der Lehre:
+   Vpn.mosbach.dhbw.de/Lehre
+3. Authentifizieren Sie sich mit Ihren persönlichen DHBW-Dual3-Zugangsdaten.
+
+Erst wenn der VPN-Tunnel aktiv steht, sind die Ports für die nachfolgenden 
+Datenbank-Abfragen physisch erreichbar.
 
 ========================================================================
 SCHRITT 1: PRÜFUNG DER VERZEICHNISSTRUKTUR
@@ -31,12 +46,21 @@ Projektanwendung/
         └── app.js
 
 ========================================================================
-SCHRITT 2: DATENBANK-KONFIGURATION (.env)
+SCHRITT 2: INFRASTRUKTUR-TEST & UMFELD-VARIABLEN (.env)
 ========================================================================
-Erstellen Sie die Datei `.env` direkt im Hauptverzeichnis 
-(Projektanwendung/) und tragen Sie Ihre PostgreSQL-Zugangsdaten von Moodle ein:
+Um sicherzustellen, dass die PostgreSQL-Instanz fehlerfrei antwortet, 
+wird dringend empfohlen, die Verbindung vorab manuell zu prüfen:
 
-DB_HOST=127.0.0.1
+1. Öffnen Sie DBeaver.
+2. Erstellen Sie eine neue PostgreSQL-Verbindung mit den Host-Daten aus Moodle.
+3. Klicken Sie auf "Verbindung testen". Schlägt dieser fehl, prüfen Sie 
+   erneut den VPN-Status aus Schritt 0. Lassen Sie DBeaver geöffnet, falls 
+   Sie die Tabellenstrukturen live einsehen möchten.
+
+Erstellen Sie nun die Datei `.env` direkt im Hauptverzeichnis 
+(Projektanwendung/) und tragen Sie die Zugangsdaten ein:
+
+DB_HOST=ihr_moodle_server_host
 DB_PORT=5432
 DB_NAME=ihr_datenbankname
 DB_USER=ihr_benutzername
@@ -62,20 +86,7 @@ SCHRITT 3: VIRTUAL ENVIRONMENT & PAKETINSTALLATION
    pip install fastapi uvicorn pandas geopandas shapely sqlalchemy psycopg2 python-dotenv
 
 ========================================================================
-SCHRITT 4: AUSFÜHREN DER DATA-PIPELINE (ETL)
-========================================================================
-Bevor das Frontend Daten anzeigen kann, müssen die Kacheln berechnet
-und in die Datenbank geschrieben werden. Führen Sie im aktivierten 
-Terminal folgenden Befehl aus:
-
-python backend/pipeline.py
-
-Warten Sie, bis das Skript alle Phasen durchlaufen hat und die Erfolgsmeldung
-ausgibt: "🎉 ETL-Pipeline erfolgreich beendet!". In Ihrer Datenbank wurde 
-nun die Tabelle `kachel_analytics` mit exakt 221 bereinigten Zeilen angelegt.
-
-========================================================================
-SCHRITT 5: ANWENDUNG STARTEN
+SCHRITT 4: ANWENDUNG STARTEN
 ========================================================================
 1. Sie können das geöffnete Terminal nun schließen.
 2. Machen Sie im Windows-Explorer einen Doppelklick auf die Datei:
@@ -84,16 +95,3 @@ SCHRITT 5: ANWENDUNG STARTEN
 Diese Batch-Datei startet im Hintergrund den FastAPI-Uvicorn-Server 
 unter `http://127.0.0.1:8000` und öffnet zeitgleich das Frontend 
 automatisch in Ihrem Webbrowser.
-
-========================================================================
-WICHTIGER HINWEIS BEI FRONTEND-ÄNDERUNGEN:
-========================================================================
-Da Webbrowser JavaScript-Dateien extrem aggressiv im internen Speicher
-halten, drücken Sie nach dem ersten Laden oder nach Code-Anpassungen 
-im Browser unbedingt die Tastenkombination:
-
-   Strg + F5 (Hard Reload / Erzwungenes Neuladen)
-
-Dadurch wird der Cache gelöscht und das neue, passgenaue Gitter samt 
-Wochentagsleiste und Selektionsrahmen fehlerfrei gerendert.
-=========================================================================

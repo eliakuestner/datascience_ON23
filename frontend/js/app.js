@@ -2,7 +2,7 @@
 const API_BASE_URL = "http://127.0.0.1:8000/api";
 let map;
 let gridLayerGroup;
-let poiLayerGroup; // Eigener Layer-Verbund für die POI-Pins
+let poiLayerGroup; 
 let legendControl = null;
 let taktChartInstance = null;
 
@@ -62,7 +62,6 @@ function initMap() {
         maxZoom: 20
     }).addTo(map);
     
-    // Wir nutzen die native Layer-Reihenfolge – ganz ohne blockierende Panes!
     gridLayerGroup = L.layerGroup().addTo(map);
     poiLayerGroup = L.layerGroup().addTo(map); 
 }
@@ -98,7 +97,7 @@ async function loadGridData() {
     
     const indicator = indicatorElement.value;
     gridLayerGroup.clearLayers(); 
-    poiLayerGroup.clearLayers(); // POIs beim Kartenwechsel ebenfalls wipen
+    poiLayerGroup.clearLayers(); 
     selectedLayer = null;
     updateMapLegend(indicator);
 
@@ -146,8 +145,6 @@ async function loadGridData() {
                         fillOpacity: Math.min(layer.defaultFillOpacity + 0.15, 0.95)
                     });
                     layer.bringToFront();
-                    
-                    // Schiebt die POI-Marker sofort wieder über die gehoverte Kachel
                     poiLayerGroup.eachLayer(marker => marker.bringToFront());
                 }
             });
@@ -169,8 +166,6 @@ async function loadGridData() {
                 selectedLayer = layer;
                 layer.setStyle({ color: "#1a1a1a", weight: 2.5, fillOpacity: layer.defaultFillOpacity });
                 layer.bringToFront();
-
-                // Holt die POI-Marker auch nach dem Klicken der Kachel in den Vordergrund
                 poiLayerGroup.eachLayer(marker => marker.bringToFront());
 
                 loadKachelDetails(kachel.kachel_id);
@@ -244,7 +239,6 @@ function safeSetText(id, text) {
 }
 
 function displayPoiMarkersOnMap(data) {
-    // 1. Unwiderruflich alle alten POI-Marker von der Karte fegen
     poiLayerGroup.clearLayers(); 
 
     const poisToRender = [
@@ -259,7 +253,6 @@ function displayPoiMarkersOnMap(data) {
     poisToRender.forEach(poi => {
         if (!poi.name || poi.name === "-" || poi.name === "Kein Eintrag" || isNaN(poi.lat) || isNaN(poi.lon) || poi.lat === 0) return;
 
-        // Erstelle den Marker nativ auf der Standard-Ebene mit voller Interaktivität
         const marker = L.circleMarker([poi.lat, poi.lon], {
             radius: 6,
             fillColor: poi.color,
@@ -284,17 +277,27 @@ function displayPoiMarkersOnMap(data) {
         poiLayerGroup.addLayer(marker);
     });
 
-    // Holt alle frisch gerenderten Marker direkt an die Spitze der Anzeige-Hierarchie
     poiLayerGroup.eachLayer(marker => marker.bringToFront());
 }
 
 let currentTileTaktData = null;
+
+// FORMATIERUNGS-FUNKTION MIT DIAGNOSE-LOGS
+const formatPoi = (poiType, name, dist) => {
+    console.log(`[formatPoi-Check] Typ: ${poiType} | Name: "${name}" | Distanz (Typ: ${typeof dist}):`, dist);
+    if (!name || name === "-" || name === "Kein Eintrag") return "-";
+    const distFormatiert = (typeof dist === 'number') ? dist.toLocaleString("de-DE", { minimumFractionDigits: 1, maximumFractionDigits: 2 }) : dist;
+    return `${name} (${distFormatiert} km)`;
+};
 
 async function loadKachelDetails(kachelId) {
     try {
         const response = await fetch(`${API_BASE_URL}/kachel/${kachelId}`);
         if (!response.ok) throw new Error("Details konnten nicht geladen werden");
         const data = await response.json();
+
+        // SPIONAGE-LOG 1: Zeigt das komplette JSON-Objekt, das aus der API kommt
+        console.log(`==== API COMPLETE DATA FOR TILE ${kachelId} ====`, data);
 
         currentTileTaktData = data;
 
@@ -305,19 +308,19 @@ async function loadKachelDetails(kachelId) {
         safeSetText("dashHaltestellen", data.anzahl_haltestellen || 0);
         safeSetText("dashLinien", data.linien_liste || "Keine Linien vorhanden");
 
-        const formatPoi = (name, dist) => {
-            if (!name || name === "-" || name === "Kein Eintrag") return "-";
-            const distFormatiert = (typeof dist === 'number') ? dist.toLocaleString("de-DE", { minimumFractionDigits: 1, maximumFractionDigits: 2 }) : dist;
-            return `${name} (${distFormatiert} km)`;
-        };
+        // SPIONAGE-LOG 2: Überprüfung der konkreten Werte direkt vor dem Funktionsaufruf
+        console.log("[Keys-Pre-Check] Hospital:", data.nearest_hospital_name, data.dist_hospital_km);
+        console.log("[Keys-Pre-Check] Townhall:", data.nearest_townhall_name, data.dist_townhall_km);
 
-        safeSetText("dashHospitalDist", formatPoi(data.nearest_hospital_name, data.dist_hospital_km));
-        safeSetText("dashTownhallDist", formatPoi(data.nearest_townhall_name, data.dist_townhall_km));
-        safeSetText("dashBahnhofDist", formatPoi(data.nearest_bahnhof_name, data.dist_bahnhof_km));
-        safeSetText("dashCinemaDist", formatPoi(data.nearest_cinema_name, data.dist_cinema_km));
-        safeSetText("dashTheatreDist", formatPoi(data.nearest_theatre_name, data.dist_theatre_km));
-        safeSetText("dashZooDist", formatPoi(data.nearest_zoo_name, data.dist_zoo_km));
-
+        // FIXED CHANNELS: Zielt jetzt fehlerfrei direkt auf die IDs der index.html
+        // FIX: IDs an die index.html anpassen (mit "Dist" am Ende)
+        safeSetText("dashHospitalDist", formatPoi("Hospital", data.nearest_hospital_name, data.dist_hospital_km));
+        safeSetText("dashTownhallDist", formatPoi("Townhall", data.nearest_townhall_name, data.dist_townhall_km));
+        safeSetText("dashBahnhofDist", formatPoi("Bahnhof", data.nearest_bahnhof_name, data.dist_bahnhof_km));
+        safeSetText("dashCinemaDist", formatPoi("Cinema", data.nearest_cinema_name, data.dist_cinema_km));
+        safeSetText("dashTheatreDist", formatPoi("Theatre", data.nearest_theatre_name, data.dist_theatre_km));
+        safeSetText("dashZooDist", formatPoi("Zoo", data.nearest_zoo_name, data.dist_zoo_km));
+        
         displayPoiMarkersOnMap(data);
 
         const activeBtn = document.querySelector('.day-btn.active') || document.querySelector('.day-btn[data-day="mo"]');
