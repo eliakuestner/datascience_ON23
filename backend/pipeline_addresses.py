@@ -22,7 +22,7 @@ def get_db_engine():
 
 def run_address_pipeline():
     engine = get_db_engine()
-    print("🚌 Berechne Haltestellen-Grid für Adress-Mapping...")
+    print("🚌 Berechne Haltestellen-Grid for Adress-Mapping...")
     df_stops = pd.read_sql("SELECT stop_id, stop_lat, stop_lon FROM public.stops", engine)
     gdf_stops = gpd.GeoDataFrame(df_stops, geometry=gpd.points_from_xy(df_stops.stop_lon, df_stops.stop_lat), crs="EPSG:4326").to_crs("EPSG:3035")
     
@@ -49,9 +49,22 @@ def run_address_pipeline():
             location = geolocator.reverse((lat, lon), timeout=15, language="de")
             if location and location.raw and 'address' in location.raw:
                 addr_details = location.raw['address']
+                
+                # Details extrahieren
                 ort = addr_details.get('suburb') or addr_details.get('village') or addr_details.get('town') or addr_details.get('city') or "Region Karlsruhe"
                 strasse = addr_details.get('road')
-                anzeige_text = f"{ort}, {strasse}" if strasse else f"{ort}"
+                plz = addr_details.get('postcode')
+                
+                # Formatierung zusammensetzen: "PLZ Ort, Straße" oder Fallbacks
+                if plz and strasse:
+                    anzeige_text = f"{plz} {ort}, {strasse}"
+                elif plz:
+                    anzeige_text = f"{plz} {ort}"
+                elif strasse:
+                    anzeige_text = f"{ort}, {strasse}"
+                else:
+                    anzeige_text = f"{ort}"
+                    
                 adressen.append(anzeige_text)
             else:
                 adressen.append(f"Bereich {round(lat, 3)} / {round(lon, 3)}")
