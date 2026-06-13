@@ -19,7 +19,7 @@ def get_db_engine():
 
 def generate_fahrzeiten_matrizen():
     engine = get_db_engine()
-    print("⏳ lade Basisdaten aus public.kachel_analytics...")
+    print("⏳ Lade Basisdaten aus public.kachel_analytics...")
     
     query = """
         SELECT 
@@ -38,13 +38,13 @@ def generate_fahrzeiten_matrizen():
     rows_daseinsvorsorge = []
     rows_freizeit = []
     
-    print("🔄 Transformiere Daten in fahrzeitoptimierte Matrizen (inkl. Freitagabend-Erweiterung)...")
+    print("🔄 Transformiere Daten in getrennte Matrizen (saubere POI-Trennung)...")
     for _, row in df_analytics.iterrows():
         k_id = int(row["kachel_id"])
         adr = row["adresse"]
         b_klasse = row["bevoelkerungs_klasse"]
         
-        # 1. BEREICH: DASEINSVORSORGE (Unter der Woche)
+        # 1. BEREICH: DASEINSVORSORGE (Nur Hospital, Townhall, Station)
         pois_dasein = [
             {"typ": "hospital", "name": row["nearest_hospital_name"], "dist": row["dist_hospital_km"]},
             {"typ": "townhall", "name": row["nearest_townhall_name"], "dist": row["dist_townhall_km"]},
@@ -67,7 +67,7 @@ def generate_fahrzeiten_matrizen():
                 "avg_zeit_pro_luftlinie_km": None
             })
             
-        # 2. BEREICH: FREIZEIT & KULTUR (Wochenende erweitert um Freitagabend)
+        # 2. BEREICH: FREIZEIT & KULTUR (Nur Cinema, Theatre, Zoo)
         pois_freizeit = [
             {"typ": "cinema", "name": row["nearest_cinema_name"], "dist": row["dist_cinema_km"]},
             {"typ": "theatre", "name": row["nearest_theatre_name"], "dist": row["dist_theatre_km"]},
@@ -84,18 +84,18 @@ def generate_fahrzeiten_matrizen():
                 "poi_typ": poi["typ"],
                 "poi_name": p_name,
                 "distanz_luftlinie_km": distanz,
-                # Freitag KPIs (Neu!)
+                # Freitag
                 "zeit_fr_abends_min": None,
                 "heimfahrt_fr_spateste": None,
-                # Samstag KPIs
+                # Samstag
                 "zeit_sa_mittags_min": None,
                 "zeit_sa_abends_min": None,
                 "heimfahrt_sa_spateste": None,
-                # Sonntag KPIs
+                # Sonntag
                 "zeit_so_mittags_min": None,
                 "zeit_so_abends_min": None,
                 "heimfahrt_so_spateste": None,
-                # Auswertungs-Spalten
+                # Auswertungen
                 "avg_zeit_fr_pro_luftlinie_km": None,
                 "avg_zeit_sa_pro_luftlinie_km": None,
                 "avg_zeit_so_pro_luftlinie_km": None
@@ -113,7 +113,7 @@ def generate_fahrzeiten_matrizen():
     df_dasein.to_sql("kachel_fahrzeiten_daseinsvorsorge", engine, if_exists="replace", index=False)
     df_freizeit.to_sql("kachel_fahrzeiten_freizeit", engine, if_exists="replace", index=False)
     
-    print("🎉 Beide fahrzeit_matrizen wurden erfolgreich in PostgreSQL neu angelegt!")
+    print(f"🎉 Fertig! Daseinsvorsorge: {len(df_dasein)} Zeilen | Freizeit: {len(df_freizeit)} Zeilen.")
 
 if __name__ == "__main__":
     generate_fahrzeiten_matrizen()
