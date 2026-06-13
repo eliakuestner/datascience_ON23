@@ -29,7 +29,7 @@ def classify_zone(einwohner):
 
 def run_etl_pipeline():
     engine = get_db_engine()
-    print("🚀 Starte empirische Wochentags-Pipeline (Unique Trips & POI-Fix)...")
+    print("🚀 Starte empirische Wochentags-Pipeline (Ohne künstliche Indizes)...")
 
     # --- SCHRITT A & B: GRID GENERIERUNG ---
     df_stops_raw = pd.read_sql("SELECT stop_id, stop_lat, stop_lon FROM public.stops", engine)
@@ -66,7 +66,7 @@ def run_etl_pipeline():
 
     gdf_grid['bevoelkerungs_klasse'] = gdf_grid['einwohner'].apply(classify_zone)
 
-    # --- SCHRITT E: POI-INTEGRATION (FIXED KOORDINATEN) ---
+    # --- SCHRITT E: POI-INTEGRATION ---
     print("📍 Integriere POIs mit ECHTEN Geokoordinaten...")
     df_pois = pd.read_sql("SELECT name, poi_type, \"X\" as x_lon, \"Y\" as y_lat FROM public.karlsruhe_pois_datensatz", engine)
     gdf_pois_metric = gpd.GeoDataFrame(df_pois, geometry=gpd.points_from_xy(df_pois.x_lon, df_pois.y_lat), crs="EPSG:4326").to_crs("EPSG:3035")
@@ -140,9 +140,6 @@ def run_etl_pipeline():
         for tag in ['mo', 'di', 'mi', 'do', 'fr', 'sa', 'so']:
             gdf_grid[f'takt_24h_{tag}'] = ",".join(["0"] * 24)
 
-    gdf_grid['takt_pendler_morgens'] = gdf_grid['anzahl_haltestellen'] * 2.5 
-    gdf_grid['takt_wochenende'] = gdf_grid['anzahl_haltestellen'] * 1.2
-
     # --- SCHRITT H: ADRESSEN AUS KACHEL_ADRESSEN JOINEN ---
     print("🔄 Verknüpfe Adressen aus public.kachel_adressen...")
     df_source_addresses = pd.read_sql("SELECT kachel_id, adresse FROM public.kachel_adressen", engine)
@@ -156,7 +153,6 @@ def run_etl_pipeline():
         'kachel_id', 'x_min', 'y_min', 'anzahl_haltestellen', 'einwohner', 'bevoelkerungs_klasse', 'adresse', 'linien_liste',
         'p1_lat', 'p1_lon', 'p2_lat', 'p2_lon', 'p3_lat', 'p3_lon', 'p4_lat', 'p4_lon',
         'takt_24h_mo', 'takt_24h_di', 'takt_24h_mi', 'takt_24h_do', 'takt_24h_fr', 'takt_24h_sa', 'takt_24h_so',
-        'takt_pendler_morgens', 'takt_wochenende',
         'dist_hospital_km', 'nearest_hospital_name', 'hospital_lon', 'hospital_lat',
         'dist_townhall_km', 'nearest_townhall_name', 'townhall_lon', 'townhall_lat',
         'dist_bahnhof_km', 'nearest_bahnhof_name', 'bahnhof_lon', 'bahnhof_lat',
@@ -166,18 +162,7 @@ def run_etl_pipeline():
     ]
     
     df_final = pd.DataFrame(gdf_grid).rename(columns={'x_3k': 'x_min', 'y_3k': 'y_min'})
-    
-    # =======================================================
-    # CRITICAL FIX: Säubert kachel_id Duplikate vor dem Export!
-    # =======================================================
     df_final = df_final.drop_duplicates(subset=['kachel_id'], keep='first')
-    
-    # Berechne den Score
-    max_einwohner = df_final['einwohner'].max() if df_final['einwohner'].max() > 0 else 1
-    max_takt = df_final['takt_pendler_morgens'].max() if df_final['takt_pendler_morgens'].max() > 0 else 1
-    df_final['oepnv_score'] = df_final.apply(lambda r: round(((r['einwohner'] / max_einwohner) * 40) + ((r['takt_pendler_morgens'] / max_takt) * 60), 1), axis=1)
-    
-    export_columns.append('oepnv_score')
     df_final = df_final[[col for col in export_columns if col in df_final.columns]]
 
     with engine.begin() as conn:

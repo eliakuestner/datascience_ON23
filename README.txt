@@ -82,8 +82,8 @@ SCHRITT 3: VIRTUAL ENVIRONMENT & PAKETINSTALLATION
    .\venv\Scripts\activate
    (Nach der Aktivierung steht ein "(venv)" ganz vorne in Ihrer Zeile.)
 
-4. Installieren Sie alle notwendigen Bibliotheken über pip:
-   pip install fastapi uvicorn pandas geopandas shapely sqlalchemy psycopg2 python-dotenv
+4. Installieren Sie alle notwendigen Bibliotheken über die requirements.txt im backend-Ordner:
+   pip install -r backend/requirements.txt
 
 ========================================================================
 SCHRITT 4: ANWENDUNG STARTEN

@@ -282,9 +282,7 @@ function displayPoiMarkersOnMap(data) {
 
 let currentTileTaktData = null;
 
-// FORMATIERUNGS-FUNKTION MIT DIAGNOSE-LOGS
 const formatPoi = (poiType, name, dist) => {
-    console.log(`[formatPoi-Check] Typ: ${poiType} | Name: "${name}" | Distanz (Typ: ${typeof dist}):`, dist);
     if (!name || name === "-" || name === "Kein Eintrag") return "-";
     const distFormatiert = (typeof dist === 'number') ? dist.toLocaleString("de-DE", { minimumFractionDigits: 1, maximumFractionDigits: 2 }) : dist;
     return `${name} (${distFormatiert} km)`;
@@ -296,9 +294,6 @@ async function loadKachelDetails(kachelId) {
         if (!response.ok) throw new Error("Details konnten nicht geladen werden");
         const data = await response.json();
 
-        // SPIONAGE-LOG 1: Zeigt das komplette JSON-Objekt, das aus der API kommt
-        console.log(`==== API COMPLETE DATA FOR TILE ${kachelId} ====`, data);
-
         currentTileTaktData = data;
 
         safeSetText("dashKachelId", data.kachel_id);
@@ -308,12 +303,6 @@ async function loadKachelDetails(kachelId) {
         safeSetText("dashHaltestellen", data.anzahl_haltestellen || 0);
         safeSetText("dashLinien", data.linien_liste || "Keine Linien vorhanden");
 
-        // SPIONAGE-LOG 2: Überprüfung der konkreten Werte direkt vor dem Funktionsaufruf
-        console.log("[Keys-Pre-Check] Hospital:", data.nearest_hospital_name, data.dist_hospital_km);
-        console.log("[Keys-Pre-Check] Townhall:", data.nearest_townhall_name, data.dist_townhall_km);
-
-        // FIXED CHANNELS: Zielt jetzt fehlerfrei direkt auf die IDs der index.html
-        // FIX: IDs an die index.html anpassen (mit "Dist" am Ende)
         safeSetText("dashHospitalDist", formatPoi("Hospital", data.nearest_hospital_name, data.dist_hospital_km));
         safeSetText("dashTownhallDist", formatPoi("Townhall", data.nearest_townhall_name, data.dist_townhall_km));
         safeSetText("dashBahnhofDist", formatPoi("Bahnhof", data.nearest_bahnhof_name, data.dist_bahnhof_km));

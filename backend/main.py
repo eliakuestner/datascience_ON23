@@ -27,8 +27,7 @@ app = FastAPI(title="ÖPNV-Analytics Karlsruhe API")
 
 DATABASE_URL = get_database_url()
 ENGINE = create_engine(DATABASE_URL)
-# HIER IST DIE UNZERSTÖRBARE CORS-LEINE:
-# Wir erlauben explizit JEDE Variante, wie dein Frontend auf den PC zugreifen könnte!
+
 origins = [
     "http://localhost:5500",
     "http://127.0.0.1:5500",
@@ -38,20 +37,17 @@ origins = [
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,  # <--- Erlaubt starr eure Frontend-Server-Ziele
+    allow_origins=origins,
     allow_credentials=True,
-    allow_methods=["*"],    # Erlaubt GET, POST, etc.
-    allow_headers=["*"],    # Erlaubt alle Header-Abfragen
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
-# Das exakte Spaltenverzeichnis eurer Tabelle
-# Das exakte Spaltenverzeichnis eurer Tabelle in backend/main.py
-# Das exakte Spaltenverzeichnis eurer Tabelle in backend/main.py
+# Bereinigte Spaltenliste ohne künstliche Indizes
 DETAIL_COLUMNS = [
     "kachel_id", "adresse", "einwohner", "bevoelkerungs_klasse", "anzahl_haltestellen", "linien_liste",
     "p1_lat", "p1_lon", "p2_lat", "p2_lon", "p3_lat", "p3_lon", "p4_lat", "p4_lon",
     "takt_24h_mo", "takt_24h_di", "takt_24h_mi", "takt_24h_do", "takt_24h_fr", "takt_24h_sa", "takt_24h_so",
-    "takt_pendler_morgens", "takt_wochenende",
     "dist_hospital_km", "nearest_hospital_name", "hospital_lon", "hospital_lat",
     "dist_townhall_km", "nearest_townhall_name", "townhall_lon", "townhall_lat",
     "dist_bahnhof_km", "nearest_bahnhof_name", "bahnhof_lon", "bahnhof_lat",
@@ -61,19 +57,16 @@ DETAIL_COLUMNS = [
 ]
 
 def _validate_indicator(indicator: str) -> str:
-    # Verknüpft die Dropdown-Werte aus app.js direkt mit euren DB-Spalten
     mapping = {
         "einwohner": "einwohner",
-        "stops": "anzahl_haltestellen",
-        "anzahl_haltestellen": "anzahl_haltestellen",
-        "oepnv_score": "oepnv_score"
+        "anzahl_haltestellen": "anzahl_haltestellen"
     }
     if indicator not in mapping:
         raise HTTPException(status_code=400, detail=f"Ungültiger Indikator: {indicator}")
     return mapping[indicator]
 
 
-# --- SYNCHRONE DATABASE WORKER (ABGESICHERT GEGEN INT/FLOAT/NULL ABSTÜRZE) ---
+# --- SYNCHRONE DATABASE WORKER ---
 
 def _fetch_kacheln_sync(indicator: str) -> list[dict[str, Any]]:
     column = _validate_indicator(indicator)
@@ -96,8 +89,6 @@ def _fetch_kacheln_sync(indicator: str) -> list[dict[str, Any]]:
         result = connection.execute(query)
         for row in result:
             mapping = row._mapping
-            
-            # Sicherheitsfallbacks: Wenn Koordinaten oder Werte NULL sind, fangen wir es ab
             try:
                 val = mapping["value"]
                 kacheln.append({
@@ -113,36 +104,8 @@ def _fetch_kacheln_sync(indicator: str) -> list[dict[str, Any]]:
                     "value": float(val) if val is not None else 0.0
                 })
             except Exception as e:
-                # Überspringt eine defekte Zeile im Notfall, statt die ganze API zu killen
                 continue
     return kacheln
-
-
-def _fetch_kachel_detail_sync(kachel_id: int) -> dict[str, Any] | None:
-    query = text(
-        f"""
-        SELECT {", ".join([f'"{c}"' for c in DETAIL_COLUMNS])}
-        FROM public.kachel_analytics
-        WHERE kachel_id = :kachel_id
-        LIMIT 1
-        """
-    )
-    with ENGINE.connect() as connection:
-        row = connection.execute(query, {"kachel_id": kachel_id}).fetchone()
-        if not row:
-            return None
-        
-        # Rohe Daten säubern, damit Javascript keine 'null'-Fehler wirft
-        raw_data = dict(row._mapping)
-        clean_data = {}
-        for key, val in raw_data.items():
-            if val is None:
-                if "dist" in key: clean_data[key] = 0.0
-                elif "anzahl" in key or "einwohner" in key: clean_data[key] = 0
-                else: clean_data[key] = "-"
-            else:
-                clean_data[key] = val
-        return clean_data
 
 
 # --- ASYNCHRONE API-ENDPUNKTE ---
@@ -157,7 +120,6 @@ async def get_kacheln(
 @app.get("/api/kachel/{kachel_id}")
 async def get_kachel_details(kachel_id: int):
     """Liefert alle Sidebar-Details, POIs und das Takt-Array für die Grafik."""
-    # FIX: Wir holen einfach ALLE Spalten aus der DB, damit garantiert kein Name verloren geht
     query = "SELECT * FROM public.kachel_analytics WHERE kachel_id = :id LIMIT 1"
     
     with ENGINE.connect() as conn:
@@ -165,10 +127,7 @@ async def get_kachel_details(kachel_id: int):
         if not row:
             raise HTTPException(status_code=404, detail="Kachel nicht gefunden")
         
-        # In ein echtes Python-Dictionary umwandeln
         data = dict(row._mapping)
-        
-        # Nur None-Werte sauber abfangen, ohne Datentypen (Floats) zu verändern!
         clean_data = {}
         for key, val in data.items():
             if val is None:
@@ -179,10 +138,8 @@ async def get_kachel_details(kachel_id: int):
                 else:
                     clean_data[key] = "-"
             else:
-                # WICHTIG: Floats als echte Zahlen belassen, nicht in Strings umwandeln!
                 clean_data[key] = val
         
-        # Takt-Array Fallback absichern
         if "takt_24h_array" not in clean_data or not clean_data["takt_24h_array"]:
             clean_data["takt_24h_array"] = "0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0"
             
