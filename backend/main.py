@@ -43,9 +43,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Bereinigte Spaltenliste ohne künstliche Indizes
+# Bereinigte Spaltenliste inklusive pai
 DETAIL_COLUMNS = [
-    "kachel_id", "adresse", "einwohner", "bevoelkerungs_klasse", "anzahl_haltestellen", "linien_liste",
+    "kachel_id", "adresse", "einwohner", "bevoelkerungs_klasse", "anzahl_haltestellen", "linien_liste", "pai",
     "p1_lat", "p1_lon", "p2_lat", "p2_lon", "p3_lat", "p3_lon", "p4_lat", "p4_lon",
     "takt_24h_mo", "takt_24h_di", "takt_24h_mi", "takt_24h_do", "takt_24h_fr", "takt_24h_sa", "takt_24h_so",
     "dist_hospital_km", "nearest_hospital_name", "hospital_lon", "hospital_lat",
@@ -56,10 +56,12 @@ DETAIL_COLUMNS = [
     "dist_zoo_km", "nearest_zoo_name", "zoo_lon", "zoo_lat"
 ]
 
+
 def _validate_indicator(indicator: str) -> str:
     mapping = {
         "einwohner": "einwohner",
-        "anzahl_haltestellen": "anzahl_haltestellen"
+        "anzahl_haltestellen": "anzahl_haltestellen",
+        "pai": "pai"
     }
     if indicator not in mapping:
         raise HTTPException(status_code=400, detail=f"Ungültiger Indikator: {indicator}")
@@ -135,6 +137,8 @@ async def get_kachel_details(kachel_id: int):
                     clean_data[key] = 0.0
                 elif "anzahl" in key or "einwohner" in key:
                     clean_data[key] = 0
+                elif key == "pai":
+                    clean_data[key] = 0.0
                 else:
                     clean_data[key] = "-"
             else:

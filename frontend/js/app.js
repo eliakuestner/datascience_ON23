@@ -180,6 +180,13 @@ async function loadGridData() {
 }
 
 function getColorForScale(value, maxVal, indicator) {
+    if (indicator === 'pai') {
+        const val = Math.max(0, Math.min(1, value)); 
+        const r = Math.round(0 + (227 - 0) * val);
+        const g = Math.round(200 + (0 - 200) * val);
+        const b = Math.round(50 + (11 - 50) * val);
+        return `rgb(${r},${g},${b})`;
+    }
     if (value === 0) return "#eef1f6"; 
     if (indicator === 'einwohner') {
         if (value <= 4500) return "#ffb3b3";  
@@ -196,6 +203,7 @@ function getColorForScale(value, maxVal, indicator) {
 }
 
 function getOpacityForScale(value, maxVal, indicator) {
+    if (indicator === 'pai') return 0.70;
     if (value === 0) return 0.15; 
     if (indicator === 'einwohner') {
         if (value <= 4500) return 0.40;  
@@ -216,7 +224,7 @@ function updateMapLegend(indicator) {
         div.style.background = "#ffffff"; div.style.padding = "12px"; div.style.border = "1px solid #C7CFE3";
         div.style.fontFamily = "'Titillium Web', sans-serif"; div.style.fontSize = "11px"; div.style.color = "#1a1a1a";
 
-        let title = indicator === 'einwohner' ? "Einwohnerzahl (Zensus)" : "Anzahl Haltestellen";
+        let title = indicator === 'einwohner' ? "Einwohnerzahl (Zensus)" : (indicator === 'pai' ? "Pendler-Abhängigkeit (PAI)" : "Anzahl Haltestellen");
         let html = `<b style="display:block;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.5px;font-size:12px;">${title}</b>`;
 
         if (indicator === 'einwohner') {
@@ -225,6 +233,12 @@ function updateMapLegend(indicator) {
             for (let i = 0; i < colors.length; i++) {
                 html += `<div style="display:flex; align-items:center; margin-bottom:5px;"><i style="background:${colors[i]}; width:16px; height:16px; margin-right:8px; border:1px solid #C7CFE3; display:inline-block;"></i><span>${labels[i]}</span></div>`;
             }
+        } else if (indicator === 'pai') {
+            html += `
+                <div style="display: flex; flex-direction: column; gap: 5px;">
+                    <div style="display:flex; align-items:center;"><i style="background:rgb(227,0,11); width:16px; height:16px; margin-right:8px; border:1px solid #C7CFE3; display:inline-block; opacity:0.7;"></i><span>Hohe Takt-Asymmetrie (Rot)</span></div>
+                    <div style="display:flex; align-items:center;"><i style="background:rgb(0,200,50); width:16px; height:16px; margin-right:8px; border:1px solid #C7CFE3; display:inline-block; opacity:0.7;"></i><span>Homogener Ganztagstakt (Grün)</span></div>
+                </div>`;
         } else {
             html += `<div style="display:flex; flex-direction:column; gap:6px; width:190px;"><div style="background:linear-gradient(to right, #ffb3b3, #00c832); height:14px; border:1px solid #C7CFE3; width:100%;"></div></div>`;
         }
@@ -311,6 +325,25 @@ async function loadKachelDetails(kachelId) {
         safeSetText("dashZooDist", formatPoi("Zoo", data.nearest_zoo_name, data.dist_zoo_km));
         
         displayPoiMarkersOnMap(data);
+
+        // --- PAI ERKLÄRUNGSBOX LOGIK (Mathematisch entkoppelte, empirische Erklärung) ---
+        const paiBox = document.getElementById("pai-explanation-box");
+        const paiValDisplay = document.getElementById("pai-value-display");
+        const paiTxtDisplay = document.getElementById("pai-text-display");
+        
+        if (data.pai !== undefined && data.pai !== null) {
+            const paiVal = parseFloat(data.pai) || 0.0;
+            const prozentualerEinbruch = Math.round(paiVal * 100);
+            
+            if (paiBox) paiBox.style.display = "block";
+            if (paiValDisplay) paiValDisplay.innerText = `Indexwert: ${paiVal.toFixed(2)} (${prozentualerEinbruch}% Takt-Reduktion)`;
+            
+            if (paiTxtDisplay) {
+                paiTxtDisplay.innerHTML = `Der PAI misst das relationale Delta zwischen den Hauptverkehrszeiten (Peak) und dem Mittags-Nebental (Off-Peak). <br><br>Ein Wert von <strong>${paiVal.toFixed(2)}</strong> belegt empirisch, dass das ÖPNV-Angebot in dieser Kachel außerhalb der Stoßzeiten um exakt <strong>${prozentualerEinbruch}%</strong> ausgedünnt wird. Je höher dieser Prozentsatz ist, desto isolierter operiert die Kachel außerhalb der reinen Pendler-Kernzeiten.`;
+            }
+        } else {
+            if (paiBox) paiBox.style.display = "none";
+        }
 
         const activeBtn = document.querySelector('.day-btn.active') || document.querySelector('.day-btn[data-day="mo"]');
         const selectedDay = activeBtn ? (activeBtn.getAttribute('data-day') || 'mo') : 'mo';

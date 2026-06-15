@@ -29,6 +29,7 @@
                     <select id="indicatorSelect" class="kpi-select">
                         <option value="einwohner">Einwohnerzahl (Zensus 2022)</option>
                         <option value="anzahl_haltestellen">Anzahl ÖPNV-Haltestellen</option>
+                        <option value="pai">Analyse: Pendlerzeiten-Abhängigkeitsindex (PAI)</option>
                     </select>
                 </div>
 
@@ -133,6 +134,13 @@
                     <div class="chart-container" style="position: relative; height: 180px;">
                         <canvas id="taktChart"></canvas>
                     </div>
+                    
+                    <div id="pai-explanation-box" style="margin-top: 15px; padding: 10px; background: #f8f9fa; border-left: 3px solid #E3000B; font-family: 'Titillium Web', sans-serif; display: none;">
+                        <h4 style="margin: 0 0 5px 0; font-size: 12px; font-weight: 700; color: #1a1a1a; text-transform: uppercase; letter-spacing: 0.5px;">Pendler-Abhängigkeit (PAI)</h4>
+                        <p id="pai-value-display" style="margin: 0 0 5px 0; font-size: 14px; font-weight: 700; color: #E3000B;"></p>
+                        <p id="pai-text-display" style="margin: 0; font-size: 11px; line-height: 1.4; color: #4a5568; text-align: justify;"></p>
+                    </div>
+
                     <div class="day-selector" style="display: flex; gap: 2px; margin-top: 10px; background: #f0f0f0; padding: 2px;">
                         <button class="day-btn active" data-day="mo" style="flex: 1; padding: 6px 2px; border: 1px solid #C7CFE3; background: #E3000B; color: #ffffff; font-family: 'Titillium Web', sans-serif; font-size: 11px; font-weight: 600; cursor: pointer; border-radius: 0; transition: all 0.15s; text-align: center;">MO</button>
                         <button class="day-btn" data-day="di" style="flex: 1; padding: 6px 2px; border: 1px solid #C7CFE3; background: #ffffff; color: #000000; font-family: 'Titillium Web', sans-serif; font-size: 11px; font-weight: 600; cursor: pointer; border-radius: 0; transition: all 0.15s; text-align: center;">DI</button>
