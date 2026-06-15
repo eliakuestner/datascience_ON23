@@ -22,10 +22,9 @@ def calculate_pai_values():
     url = get_database_url()
     engine = create_engine(url)
 
-    print("Starte Berechnung des Pendlerzeiten-Abhängigkeitsindex (PAI)...")
+    print("Starte korrigierte Berechnung des PAI (6:30-8:30 & 16:00-18:30)...")
 
     with engine.begin() as conn:
-        # 1. Spalte hinzufügen, falls sie nicht existiert
         conn.execute(
             text(
                 """
@@ -35,7 +34,6 @@ def calculate_pai_values():
             )
         )
 
-        # 2. Alle relevanten Daten für die Berechnung laden
         result = conn.execute(
             text(
                 "SELECT kachel_id, takt_24h_mo FROM public.kachel_analytics;"
@@ -51,12 +49,11 @@ def calculate_pai_values():
                 continue
 
             try:
-                # String in Integer-Array parsen (24 Stunden)
                 takt = [int(x) for x in takt_string.split(",")]
                 if len(takt) != 24:
                     continue
 
-                # Peak-Stunden: Morgens (06, 07, 08) & Nachmittags (16, 17, 18)
+                # KORREKTUR: Peak-Stunden (6, 7, 8 und 16, 17, 18)
                 peak_hours = [
                     takt[6],
                     takt[7],
@@ -67,19 +64,24 @@ def calculate_pai_values():
                 ]
                 f_peak = sum(peak_hours) / len(peak_hours)
 
-                # Off-Peak-Stunden (Mittagstal): 10, 11, 12, 13, 14
-                off_peak_hours = [takt[10], takt[11], takt[12], takt[13], takt[14]]
+                # KORREKTUR: Off-Peak-Stunden (09:00 bis 16:00 Uhr -> Indizes 9 bis 15)
+                off_peak_hours = [
+                    takt[9],
+                    takt[10],
+                    takt[11],
+                    takt[12],
+                    takt[13],
+                    takt[14],
+                    takt[15],
+                ]
                 f_offpeak = sum(off_peak_hours) / len(off_peak_hours)
 
-                # PAI Formel: (F_peak - F_offpeak) / F_peak
                 if f_peak > 0:
                     pai = (f_peak - f_offpeak) / f_peak
-                    # PAI mathematisch auf den Bereich [0.0, 1.0] begrenzen
                     pai = max(0.0, min(1.0, pai))
                 else:
                     pai = 0.0
 
-                # Wert in Datenbank schreiben
                 conn.execute(
                     text(
                         "UPDATE public.kachel_analytics SET pai = :pai WHERE kachel_id = :id"
@@ -93,7 +95,7 @@ def calculate_pai_values():
                 continue
 
         print(
-            f"Erfolgreich beendet! {updated_count} Kacheln wurden mit PAI-Werten aktualisiert."
+            f"Erfolgreich beendet! {updated_count} Kacheln wurden mit den neuen PAI-Werten aktualisiert."
         )
 
 

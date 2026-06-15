@@ -1,9 +1,11 @@
 import os
 import matplotlib.pyplot as plt
+import matplotlib.ticker as mtick
 import pandas as pd
 import seaborn as sns
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
+from scipy.stats import kruskal
 
 # 1. Umgebung und Datenbankverbindung laden
 load_dotenv()
@@ -31,8 +33,7 @@ query = """
 with engine.connect() as conn:
     df = pd.read_sql_query(text(query), conn)
 
-# 3. Wissenschaftliche Sortierung der X-Achsen-Klassen festlegen
-# Passen Sie die Strings exakt an Ihre Bezeichnungen in der DB an
+# 3. Wissenschaftliche Sortierung (X-Achse) - Exakt wie in deiner DB hinterlegt
 klassen_reihenfolge = [
     "Ländliche Zone",
     "Aussenstädtische Zone",
@@ -40,17 +41,17 @@ klassen_reihenfolge = [
     "Metropolitane Kernzone",
 ]
 
-# Filtern, falls unerwartete Klassenbezeichnungen existieren
+# Filtern auf die korrekten Klassenbezeichnungen aus der DB
 df = df[df["bevoelkerungs_klasse"].isin(klassen_reihenfolge)]
 
 # 4. Styling für die wissenschaftliche Präsentation (Modern Minimalist)
 plt.figure(figsize=(10, 6), dpi=300)
 sns.set_theme(style="whitegrid")
 
-# KVV-Rot als Akzentfarbe für den Median, gedämpftes Blaugrau für die Boxen
+# Farbpalette für die Boxen
 palette = ["#f2a6a6", "#ffd1b3", "#d1ffd1", "#b3f0c2"]
 
-# Boxplot zeichnen (Verteilung)
+# Boxplot zeichnen (Statistische Verteilung)
 ax = sns.boxplot(
     x="bevoelkerungs_klasse",
     y="pai",
@@ -59,11 +60,11 @@ ax = sns.boxplot(
     width=0.5,
     palette=palette,
     linewidth=1.5,
-    fliersize=0,  # Ausreißer-Punkte ausblenden, da wir alle Einzelpunkte zeichnen
-    medianprops={"color": "#E3000B", "linewidth": 2.5},  # KVV-Rot für den Median
+    fliersize=0,
+    medianprops={"color": "#E3000B", "linewidth": 2.5},
 )
 
-# Stripplot überlagern (Zeigt jede einzelne Kachel als kleinen Punkt)
+# Stripplot überlagern
 sns.stripplot(
     x="bevoelkerungs_klasse",
     y="pai",
@@ -75,7 +76,7 @@ sns.stripplot(
     jitter=0.2,
 )
 
-# 5. Achsenbeschriftungen und typografische Hierarchie (Titillium Web-Ästhetik)
+# 5. Achsenbeschriftungen und Typografie
 plt.title(
     "Empirischer Nachweis der Takt-Asymmetrie nach Siedlungsstruktur",
     fontsize=14,
@@ -85,23 +86,49 @@ plt.title(
 )
 plt.xlabel("Zensus Bevölkerungsdichteklasse", fontsize=11, fontweight="semibold", labelpad=10)
 plt.ylabel(
-    "Pendlerzeiten-Abhängigkeitsindex (PAI)\n[0.0 = Homogen | 1.0 = Maximaler Einbruch im Off-Peak]",
+    "Pendlerzeiten-Abhängigkeitsindex (PAI)\n[Peak: 6:30-8:30 & 16:00-18:30 | Off-Peak: 9:00-16:00]",
     fontsize=11,
     fontweight="semibold",
     labelpad=10,
 )
 
-# Y-Achse auf Prozent-Skala anpassen (0% bis 100%)
+# Y-Achsen-Prozentformatierung ohne Warnungen
 ax.set_ylim(-0.05, 1.05)
-vals = ax.get_yticks()
-ax.set_yticklabels(["{:,.0%}".format(x) for x in vals])
+ax.yaxis.set_major_formatter(mtick.PercentFormatter(1.0))
 
-# Layout-Anpassung, um Abschneiden zu verhindern
 plt.tight_layout()
 
-# Grafik als PNG für die Präsentation abspeichern
+# Grafik speichern
 output_path = "PAI_Siedlungsstruktur_Beweis.png"
 plt.savefig(output_path, bbox_inches="tight")
-print(
-    f"📊 Präsentationsgrafik erfolgreich unter '{output_path}' generiert!"
-)
+print(f"📊 Präsentationsgrafik erfolgreich unter '{output_path}' generiert!")
+
+# ==============================================================================
+# --- STATISTISCHER SIGNIFIKANZTEST & LIVE-MEDIAN-BERECHNUNG ---
+# ==============================================================================
+print("\n--- Führe Kruskal-Wallis-Test mit korrigierten Fenstern durch ---")
+
+# Aufteilen der PAI-Werte nach den 4 Klassen
+g1 = df[df['bevoelkerungs_klasse'] == 'Ländliche Zone']['pai']
+g2 = df[df['bevoelkerungs_klasse'] == 'Aussenstädtische Zone']['pai']
+g3 = df[df['bevoelkerungs_klasse'] == 'Urbane Kernzone']['pai']
+g4 = df[df['bevoelkerungs_klasse'] == 'Metropolitane Kernzone']['pai']
+
+# Live-Ausgabe der exakten Gruppengrößen und der REALEN MEDIANE aus deiner DB
+print(f"Datensätze in 'Ländliche Zone': {len(g1)} | Echter Median (PAI): {g1.median():.4f} ({g1.median()*100:.2f}%)")
+print(f"Datensätze in 'Aussenstädtische Zone': {len(g2)} | Echter Median (PAI): {g2.median():.4f} ({g2.median()*100:.2f}%)")
+print(f"Datensätze in 'Urbane Kernzone': {len(g3)} | Echter Median (PAI): {g3.median():.4f} ({g3.median()*100:.2f}%)")
+print(f"Datensätze in 'Metropolitane Kernzone': {len(g4)} | Echter Median (PAI): {g4.median():.4f} ({g4.median()*100:.2f}%)")
+
+# Test berechnen
+if len(g1) > 0 and len(g2) > 0 and len(g3) > 0 and len(g4) > 0:
+    stat, p_val = kruskal(g1, g2, g3, g4)
+    print(f"\n-> Kruskal-Wallis-Statistik (H-Wert): {stat:.4f}")
+    print(f"-> p-Wert: {p_val:.6f}")
+    
+    if p_val < 0.05:
+        print("Ergebnis: STATISTISCH SIGNIFIKANT (p < 0.05). Die Verteilungen der Gruppen unterscheiden sich systematisch.")
+    else:
+        print("Ergebnis: NICHT SIGNIFIKANT (p >= 0.05). Es kann kein systematischer Unterschied mathematisch bewiesen werden.")
+else:
+    print("\n❌ Fehler: Eine oder mehrere Bevölkerungsklassen enthalten 0 Datensätze.")
