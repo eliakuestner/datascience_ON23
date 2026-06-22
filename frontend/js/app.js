@@ -145,7 +145,11 @@ async function loadGridData() {
                         fillOpacity: Math.min(layer.defaultFillOpacity + 0.15, 0.95)
                     });
                     layer.bringToFront();
-                    poiLayerGroup.eachLayer(marker => marker.bringToFront());
+                    
+                    // FIX: SetZIndexOffset statt bringToFront für L.marker
+                    poiLayerGroup.eachLayer(marker => {
+                        if(marker.setZIndexOffset) marker.setZIndexOffset(1000);
+                    });
                 }
             });
 
@@ -166,7 +170,11 @@ async function loadGridData() {
                 selectedLayer = layer;
                 layer.setStyle({ color: "#1a1a1a", weight: 2.5, fillOpacity: layer.defaultFillOpacity });
                 layer.bringToFront();
-                poiLayerGroup.eachLayer(marker => marker.bringToFront());
+                
+                // FIX: SetZIndexOffset statt bringToFront für L.marker
+                poiLayerGroup.eachLayer(marker => {
+                    if(marker.setZIndexOffset) marker.setZIndexOffset(1000);
+                });
 
                 loadKachelDetails(kachel.kachel_id);
             });
@@ -255,35 +263,85 @@ function safeSetText(id, text) {
 function displayPoiMarkersOnMap(data) {
     poiLayerGroup.clearLayers(); 
 
+    // Double Encoding Setup: 2 Farben, 2-Buchstaben-Labels
     const poisToRender = [
-        { name: data.nearest_hospital_name, type: "Krankenhaus", lat: parseFloat(data.hospital_lat), lon: parseFloat(data.hospital_lon), color: "#b0d6ff" },
-        { name: data.nearest_townhall_name, type: "Rathaus", lat: parseFloat(data.townhall_lat), lon: parseFloat(data.townhall_lon), color: "#003d27" },
-        { name: data.nearest_bahnhof_name, type: "Fernbahnhof", lat: parseFloat(data.bahnhof_lat), lon: parseFloat(data.bahnhof_lon), color: "#6f42c1" },
-        { name: data.nearest_cinema_name, type: "Kino", lat: parseFloat(data.cinema_lat), lon: parseFloat(data.cinema_lon), color: "#e83e8c" },
-        { name: data.nearest_theatre_name, type: "Theater", lat: parseFloat(data.theatre_lat), lon: parseFloat(data.theatre_lon), color: "#20c997" },
-        { name: data.nearest_zoo_name, type: "Zoo", lat: parseFloat(data.zoo_lat), lon: parseFloat(data.zoo_lon), color: "#fd7e14" }
+        // Daseinsvorsorge (Blau)
+        { name: data.nearest_hospital_name, type: "Krankenhaus", label: "Kr", category: "Daseinsvorsorge", lat: parseFloat(data.hospital_lat), lon: parseFloat(data.hospital_lon), color: "#2980b9" },
+        { name: data.nearest_townhall_name, type: "Rathaus", label: "Ra", category: "Daseinsvorsorge", lat: parseFloat(data.townhall_lat), lon: parseFloat(data.townhall_lon), color: "#2980b9" },
+        { name: data.nearest_bahnhof_name, type: "Fernbahnhof", label: "Bh", category: "Daseinsvorsorge", lat: parseFloat(data.bahnhof_lat), lon: parseFloat(data.bahnhof_lon), color: "#2980b9" },
+        // Freizeit & Kultur (Orange)
+        { name: data.nearest_cinema_name, type: "Kino", label: "Ki", category: "Freizeit", lat: parseFloat(data.cinema_lat), lon: parseFloat(data.cinema_lon), color: "#e67e22" },
+        { name: data.nearest_theatre_name, type: "Theater", label: "Th", category: "Freizeit", lat: parseFloat(data.theatre_lat), lon: parseFloat(data.theatre_lon), color: "#e67e22" },
+        { name: data.nearest_zoo_name, type: "Zoo", label: "Zo", category: "Freizeit", lat: parseFloat(data.zoo_lat), lon: parseFloat(data.zoo_lon), color: "#e67e22" }
     ];
+
+    // OVERPLOTTING-SCHUTZ: Wir merken uns belegte Koordinaten und fächern sie auf
+    const seenLocations = {};
+    const offsetStep = 0.0035; // Distanz der Verschiebung (ca. 250 Meter nach Osten)
 
     poisToRender.forEach(poi => {
         if (!poi.name || poi.name === "-" || poi.name === "Kein Eintrag" || isNaN(poi.lat) || isNaN(poi.lon) || poi.lat === 0) return;
 
-        const marker = L.circleMarker([poi.lat, poi.lon], {
-            radius: 6,
-            fillColor: poi.color,
-            color: "#ffffff",
-            weight: 1.5,
-            fillOpacity: 1.0,
+        // Prüfen, ob diese exakte Koordinate schon belegt ist (auf 4 Nachkommastellen genau)
+        const locKey = `${poi.lat.toFixed(4)}_${poi.lon.toFixed(4)}`;
+        
+        let finalLat = poi.lat;
+        let finalLon = poi.lon;
+
+        if (seenLocations[locKey]) {
+            // Wenn der Platz belegt ist, verschieben wir den Marker horizontal nach rechts
+            finalLon += (offsetStep * seenLocations[locKey]);
+            seenLocations[locKey]++; // Zähler erhöhen für den nächsten, der denselben Platz will
+        } else {
+            // Platz ist frei, wir blockieren ihn für die nächsten
+            seenLocations[locKey] = 1;
+        }
+
+        // HTML-Marker generieren: Ein Quadrat mit abgerundeten Ecken und einem CSS-Dreieck als Spitze
+        const customIcon = L.divIcon({
+            className: 'custom-poi-pin',
+            html: `
+            <div style="display: flex; flex-direction: column; align-items: center; filter: drop-shadow(0px 3px 3px rgba(0,0,0,0.3));">
+                <div style="
+                    background-color: ${poi.color};
+                    color: #ffffff;
+                    width: 26px;
+                    height: 26px;
+                    border-radius: 4px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    font-size: 11px;
+                    font-weight: 700;
+                    font-family: 'Titillium Web', sans-serif;
+                    border: 1px solid #ffffff;
+                ">${poi.label}</div>
+                <div style="
+                    width: 0;
+                    height: 0;
+                    border-left: 6px solid transparent;
+                    border-right: 6px solid transparent;
+                    border-top: 8px solid ${poi.color};
+                    margin-top: -1px;
+                "></div>
+            </div>`,
+            iconSize: [26, 34], // Breite 26, Höhe 26 + 8 (Dreieck)
+            iconAnchor: [13, 34] // Verankert die SPITZE des Dreiecks exakt auf der Koordinate
+        });
+
+        const marker = L.marker([finalLat, finalLon], {
+            icon: customIcon,
             interactive: true 
         });
 
         marker.bindTooltip(`
             <div style="font-family: 'Titillium Web', sans-serif; padding: 2px;">
-                <strong style="color:${poi.color}; text-transform: uppercase; font-size: 10px; display:block; margin-bottom:2px;">${poi.type}</strong>
+                <strong style="color:${poi.color}; text-transform: uppercase; font-size: 10px; display:block; margin-bottom:2px;">${poi.category}: ${poi.type}</strong>
                 <span style="font-size: 12px; font-weight: 600;">${poi.name}</span>
             </div>
         `, {
             direction: "top",
-            offset: [0, -5],
+            offset: [0, -34], // Tooltip über die Box schieben
             opacity: 0.95,
             sticky: false 
         });
@@ -291,7 +349,9 @@ function displayPoiMarkersOnMap(data) {
         poiLayerGroup.addLayer(marker);
     });
 
-    poiLayerGroup.eachLayer(marker => marker.bringToFront());
+    poiLayerGroup.eachLayer(marker => {
+        if(marker.setZIndexOffset) marker.setZIndexOffset(1000);
+    });
 }
 
 let currentTileTaktData = null;
